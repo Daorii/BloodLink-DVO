@@ -1,0 +1,6 @@
+# Laravel backend
+bloodlink-dvo/vendor/
+bloodlink-dvo/.env
+
+# React frontend
+BloodLink_Prototype-Frontend-/node_modules/
