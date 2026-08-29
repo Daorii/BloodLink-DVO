@@ -207,3 +207,13 @@ export async function apiUpdateDonor(id, data) {
 export async function apiDeleteDonor(id) {
   return request(`/donors/${id}`, { method: 'DELETE' });
 }
+
+// ─── Donation Events endpoints ───────────────────────────────────────────
+
+export async function apiGetDonationEvents() {
+  return request('/donation-events');
+}
+
+export async function apiCreateDonationEvent(data) {
+  return request('/donation-events', { method: 'POST', body: JSON.stringify(data) });
+}

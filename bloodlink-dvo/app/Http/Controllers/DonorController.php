@@ -27,7 +27,7 @@ class DonorController extends Controller
             'address'          => 'required|string',
             'contactNumber'    => 'required|string|max:20',
             'email'            => 'nullable|email|max:100',
-            'bloodType'        => 'nullable|string|max:5',
+            'bloodType'        => 'nullable|string|max:50',
             'status'           => 'nullable|string',
             'donationDate'     => 'nullable|date',
             'lastDonation'     => 'nullable|date',

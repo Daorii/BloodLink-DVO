@@ -25,7 +25,7 @@ return new class extends Migration
             $table->string('email', 100)->nullable();
 
             // Blood info — ADD blood_type (not in DD but frontend uses it)
-            $table->string('blood_type', 5)->nullable(); // O+, A-, AB+, etc.
+            $table->string('blood_type', 50)->nullable(); // O+, A-, AB+, "Pending Conf.", etc.
 
             // Status: Regular / New / Lapsed / Deferred
             $table->string('donor_status', 20)->default('New'); // frontend: status

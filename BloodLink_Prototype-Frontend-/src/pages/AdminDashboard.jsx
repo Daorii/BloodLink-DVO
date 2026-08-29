@@ -84,6 +84,7 @@ export default function AdminDashboard() {
   const updateUser = useBloodStore((state) => state.updateUser);
   const fetchUsersFromAPI = useBloodStore((state) => state.fetchUsersFromAPI);
   const fetchHospitalsFromAPI = useBloodStore((state) => state.fetchHospitalsFromAPI);
+  const fetchDonationEventsFromAPI = useBloodStore((state) => state.fetchDonationEventsFromAPI);
   const addBloodRequest = useBloodStore((state) => state.addBloodRequest);
   const approveRequest = useBloodStore((state) => state.approveRequest);
   const recommendations = useBloodStore((state) => state.recommendations);
@@ -100,6 +101,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchUsersFromAPI();
     fetchHospitalsFromAPI();
+    fetchDonationEventsFromAPI();
   }, []);
 
   // Role Detection

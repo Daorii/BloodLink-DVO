@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { apiLogin, apiLogout, apiGetUsers, apiCreateUser, apiUpdateUser, clearToken } from '../services/api';
 import { apiGetHospitals, apiCreateHospital, apiUpdateHospital, apiDeleteHospital } from '../services/api';
 import { apiGetDonors, apiCreateDonor, apiUpdateDonor, apiDeleteDonor } from '../services/api';
+import { apiGetDonationEvents, apiCreateDonationEvent } from '../services/api';
 
 const initialDonors = [
   // ── Sample Dataset: Donor Registrationssss ──
@@ -707,42 +708,68 @@ export const useBloodStore = create(
 
       addDonor: async (newDonor) => {
         try {
-          const data = await apiCreateDonor(newDonor);
+          // Map the frontend's newDonor shape → what the API controller expects
+          const payload = {
+            firstName:      newDonor.firstName      || newDonor.name?.split(' ')[0] || '',
+            middleName:     newDonor.middleName      || null,
+            lastName:       newDonor.lastName        || newDonor.name?.split(' ').slice(-1)[0] || '',
+            sex:            newDonor.sex             || '',
+            civilStatus:    newDonor.civilStatus     || '',
+            dob:            newDonor.dob             || newDonor.birthDate || '',
+            address:        newDonor.address         || '',
+            contactNumber:  newDonor.contactNumber   || newDonor.phone || '',
+            email:          newDonor.email           || null,
+            bloodType:      newDonor.bloodType       || null,
+            status:         newDonor.status          || newDonor.donorStatus || 'New',
+            donationDate:   newDonor.registrationDate|| newDonor.donationDate || new Date().toISOString().slice(0,10),
+            lastDonation:   newDonor.lastDonation    || null,
+            totalDonations: newDonor.totalDonations  || 0,
+            remarks:        newDonor.remarks         || null,
+          };
+          const data = await apiCreateDonor(payload);
           if (data.donor) { set((s) => ({ donors: [data.donor, ...s.donors] })); return; }
         } catch (err) {
-          console.error('[BloodLink] API createDonor failed, using local fallback:', err.message, err.status || '');
+          console.error('[BloodLink] API createDonor failed, using local fallback:', err.message, err.status || '', err.data || '');
         }
+        // Fallback: local-only
         set((state) => ({ donors: [newDonor, ...state.donors] }));
       },
 
-      addDonationEvent: (eventForm) => {
-        const eventId = 'EVT-' + Math.floor(100 + Math.random() * 900);
-        const newEvent = {
-          eventId: eventId,
-          event_id: eventId,
-          province: eventForm.province || '',
-          cityMunicipality: eventForm.cityMunicipality || '',
-          city_municipality: eventForm.cityMunicipality || '',
+      fetchDonationEventsFromAPI: async () => {
+        try {
+          const data = await apiGetDonationEvents();
+          if (data.donationEvents) set({ donationEvents: data.donationEvents });
+        } catch (err) {
+          console.warn('[BloodLink] Could not fetch donation events from API:', err.message);
+        }
+      },
+
+      addDonationEvent: async (eventForm) => {
+        const payload = {
+          province:             eventForm.province || '',
+          cityMunicipality:     eventForm.cityMunicipality || '',
           barangayOrganization: eventForm.barangayOrganization || '',
-          barangay_organization: eventForm.barangayOrganization || '',
-          eventDate: eventForm.eventDate || '',
-          event_date: eventForm.eventDate || '',
-          createdAt: new Date().toLocaleString(),
-          created_at: new Date().toLocaleString()
+          eventDate:            eventForm.eventDate || '',
         };
-        set((state) => ({
-          donationEvents: [...state.donationEvents, newEvent],
-          auditLogs: [{
-            logId: 'LOG-' + Math.floor(100 + Math.random() * 900),
-            userId: state.authSystemUser?.id || 'USR-001',
-            action: `Added Donation Event: ${newEvent.barangayOrganization} (${newEvent.eventDate})`,
-            module: 'Donation Events',
-            recordId: eventId,
-            oldValue: null,
-            newValue: JSON.stringify(newEvent),
-            performedAt: new Date().toLocaleString()
-          }, ...state.auditLogs]
-        }));
+
+        // ── Try API first ──
+        try {
+          const data = await apiCreateDonationEvent(payload);
+          if (data.donationEvent) {
+            set((s) => ({
+              donationEvents: [...s.donationEvents, data.donationEvent],
+              auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: s.authSystemUser?.id || 'USR-001', action: `Added Donation Event: ${data.donationEvent.barangayOrganization} (${data.donationEvent.eventDate})`, module: 'Donation Events', recordId: data.donationEvent.eventId, oldValue: null, newValue: JSON.stringify(data.donationEvent), performedAt: new Date().toLocaleString() }, ...s.auditLogs]
+            }));
+            return data.donationEvent;
+          }
+        } catch (err) {
+          console.error('[BloodLink] API createDonationEvent failed:', err.message, err.status || '');
+        }
+
+        // ── Fallback: local-only ──
+        const eventId = 'EVT-' + Math.floor(100 + Math.random() * 900);
+        const newEvent = { eventId, event_id: eventId, province: payload.province, cityMunicipality: payload.cityMunicipality, city_municipality: payload.cityMunicipality, barangayOrganization: payload.barangayOrganization, barangay_organization: payload.barangayOrganization, eventDate: payload.eventDate, event_date: payload.eventDate, createdAt: new Date().toLocaleString(), created_at: new Date().toLocaleString() };
+        set((s) => ({ donationEvents: [...s.donationEvents, newEvent], auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: s.authSystemUser?.id || 'USR-001', action: `Added Donation Event: ${newEvent.barangayOrganization} (${newEvent.eventDate})`, module: 'Donation Events', recordId: eventId, oldValue: null, newValue: JSON.stringify(newEvent), performedAt: new Date().toLocaleString() }, ...s.auditLogs] }));
         return newEvent;
       },
 
