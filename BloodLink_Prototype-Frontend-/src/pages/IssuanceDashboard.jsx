@@ -1316,51 +1316,8 @@ export default function IssuanceDashboard() {
                   </div>
                 </div>
 
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700 flex items-start gap-2">
-                  <Shield className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                  <span>Patient names, IDs, and clinical diagnoses are not collected here per RA 10173. Use clinical indication category only.</span>
-                </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">Clinical Indication (Category) <span className="text-[#C21C24]">*</span></label>
-                    <select required name="clinicalIndication" value={form.clinicalIndication} onChange={handleFormChange}
-                      className="w-full border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none bg-white">
-                      <option value="">Select indication...</option>
-                      {['Surgical Support','Trauma / Emergency','Oncology Support','Obstetric Hemorrhage','Anemia Management','Pediatric Transfusion','Cardiac Surgery','Burns / Critical Care','Other'].map(v => (
-                        <option key={v}>{v}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">Contact Person <span className="text-[#C21C24]">*</span></label>
-                    <input required type="text" name="contactPerson" value={form.contactPerson} onChange={handleFormChange}
-                      placeholder="e.g. Dr. Juan Dela Cruz"
-                      className="w-full border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">Contact Number <span className="text-[#C21C24]">*</span></label>
-                    <input required type="tel" name="contactNumber" value={form.contactNumber} onChange={handleFormChange}
-                      placeholder="+63 917 000 0000"
-                      className="w-full border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none" />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">Hospital Reference No.</label>
-                  <input type="text" name="hospitalRefNo" value={form.hospitalRefNo} onChange={handleFormChange}
-                    placeholder="e.g. SPMC-2026-04821"
-                    className="w-full border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">Additional Notes</label>
-                  <textarea name="notes" rows={2} value={form.notes} onChange={handleFormChange}
-                    placeholder="Any special instructions or clinical context..."
-                    className="w-full border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none resize-none" />
-                </div>
 
                 {form.urgency === 'urgent' && (
                   <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 rounded-lg p-3">

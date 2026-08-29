@@ -74,7 +74,6 @@ export default function AdminDashboard() {
   const addHospital = useBloodStore((state) => state.addHospital);
   const updateHospital = useBloodStore((state) => state.updateHospital);
   const deleteHospital = useBloodStore((state) => state.deleteHospital);
-  const fetchHospitalsFromAPI = useBloodStore((state) => state.fetchHospitalsFromAPI);
   const getEquityAllocations = useBloodStore((state) => state.getEquityAllocations);
   const recordDistribution = useBloodStore((state) => state.recordDistribution);
   const getLastDistributionByBloodType = useBloodStore((state) => state.getLastDistributionByBloodType);
@@ -83,7 +82,6 @@ export default function AdminDashboard() {
   const granularForecasts = useBloodStore((state) => state.granularForecasts) ?? [];
   const addUser = useBloodStore((state) => state.addUser);
   const updateUser = useBloodStore((state) => state.updateUser);
-  const fetchUsersFromAPI = useBloodStore((state) => state.fetchUsersFromAPI);
   const addBloodRequest = useBloodStore((state) => state.addBloodRequest);
   const approveRequest = useBloodStore((state) => state.approveRequest);
   const recommendations = useBloodStore((state) => state.recommendations);
@@ -95,12 +93,6 @@ export default function AdminDashboard() {
   const auditLogs = useBloodStore((state) => state.auditLogs);
   const donationEvents = useBloodStore((state) => state.donationEvents);
   const addDonationEvent = useBloodStore((state) => state.addDonationEvent);
-
-  // Fetch users and hospitals from the Laravel API when the dashboard loads
-  useEffect(() => {
-    fetchUsersFromAPI();
-    fetchHospitalsFromAPI();
-  }, []);
 
   // Role Detection
   const adminRole = authSystemUser?.role || 'Administrator';
@@ -666,7 +658,7 @@ export default function AdminDashboard() {
               <div className="mx-4 mt-4 mb-2 bg-slate-50 border border-slate-200/60 rounded-lg p-3">
                 <div className="sidebar-desk">
                   <p className="text-slate-400 text-[9px] uppercase font-bold tracking-wider mb-0.5">Facility Desk</p>
-                  <p className="text-slate-800 font-bold text-xs">SPMC Blood Production</p>
+                  <p className="text-slate-800 font-bold text-xs">SNBC Blood Production</p>
                   <p className="text-slate-500 text-[10px] font-medium">Operations Desk</p>
                 </div>
               </div>
@@ -817,8 +809,8 @@ export default function AdminDashboard() {
                         const shimmerClass = isCritical
                           ? 'bar-shimmer bar-shimmer-red'
                           : isLow
-                          ? 'bar-shimmer bar-shimmer-amber'
-                          : 'bar-shimmer bar-shimmer-emerald';
+                            ? 'bar-shimmer bar-shimmer-amber'
+                            : 'bar-shimmer bar-shimmer-emerald';
 
                         return (
                           <div key={blood.type} className="flex items-center gap-4 text-xs font-semibold">
@@ -861,9 +853,9 @@ export default function AdminDashboard() {
                             <span className={`w-20 text-[10px] font-bold px-2 py-0.5 rounded text-center border ${isCritical
                               ? 'bg-rose-50 border-rose-100 text-[#C21C24] pulse-red'
                               : isLow
-                              ? 'bg-amber-50 border-amber-100 text-amber-700'
-                              : 'bg-emerald-50 border-emerald-100 text-emerald-700'
-                            }`}>
+                                ? 'bg-amber-50 border-amber-100 text-amber-700'
+                                : 'bg-emerald-50 border-emerald-100 text-emerald-700'
+                              }`}>
                               {isCritical ? 'Critical' : isLow ? 'Low' : 'Stable'}
                             </span>
                           </div>

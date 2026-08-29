@@ -931,6 +931,122 @@ export default function RegistryDashboard() {
               </div>
             </div>
           )}
+
+          {/* ── TAB 3: LABORATORY RESULTS (Section II / Table 8) ── */}
+          {tab === 'laboratory' && (
+            <div className="space-y-5 print:hidden fade-in">
+
+              {/* Header block */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <Droplets size={16} className="text-indigo-600" />
+                    Laboratory Test Results — Table 8
+                  </h3>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Manage and encode lab-confirmed blood types and serology TTI test outcomes</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setLabForm({
+                      donationId: '',
+                      hemoglobinResult: '14.5',
+                      bloodTypeConfirmed: 'O+',
+                      hbsagResult: 'Non-Reactive',
+                      syphilisResult: 'Non-Reactive',
+                      hivResult: 'Non-Reactive',
+                      hcvResult: 'Non-Reactive',
+                      malariaResult: 'Non-Reactive',
+                      natResult: 'Non-Reactive',
+                      othersResult: ''
+                    });
+                    setLabSaved(false);
+                    setShowLabResultModal(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer"
+                >
+                  <Plus size={13} /> Encode Lab Result
+                </button>
+              </div>
+
+              {/* Lab results table */}
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-xs font-semibold text-slate-650">
+                    <thead className="bg-slate-50 text-[10px] font-bold text-slate-450 uppercase tracking-wider text-left">
+                      <tr>
+                        <th className="px-5 py-3">Test ID</th>
+                        <th className="px-5 py-3">Donation ID</th>
+                        <th className="px-5 py-3">Confirmed Type</th>
+                        <th className="px-5 py-3">Hemoglobin</th>
+                        <th className="px-5 py-3">TTI Serology Screen (HBsAg, Syph, HIV, HCV, Malaria, NAT)</th>
+                        <th className="px-5 py-3 text-center">Status</th>
+                        <th className="px-5 py-3">Encoded By</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs font-normal text-slate-600">
+                      {(labTestResults || []).length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-5 py-8 text-center text-slate-400 text-[11px]">
+                            No lab results encoded yet. Click <strong>Encode Lab Result</strong> to record one.
+                          </td>
+                        </tr>
+                      ) : (
+                        (labTestResults || []).map((res) => {
+                          const hasReactive = [
+                            res.hbsagResult, res.syphilisResult, res.hivResult,
+                            res.hcvResult, res.malariaResult, res.natResult
+                          ].some(val => val === 'Reactive');
+
+                          return (
+                            <tr key={res.testId} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-5 py-3.5 font-mono font-bold text-slate-900">{res.testId}</td>
+                              <td className="px-5 py-3.5 font-mono text-slate-550">{res.donationId || '—'}</td>
+                              <td className="px-5 py-3.5">
+                                <span className="bg-rose-50 border border-rose-100 text-[#C21C24] font-black rounded px-1.5 py-0.5 text-[9px] font-mono">
+                                  {res.bloodTypeConfirmed}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3.5 font-mono text-[11px]">{res.hemoglobinResult} g/dL</td>
+                              <td className="px-5 py-3.5">
+                                <div className="flex flex-wrap gap-1 text-[9px] font-bold">
+                                  {[
+                                    { name: 'HBsAg', val: res.hbsagResult },
+                                    { name: 'Syph', val: res.syphilisResult },
+                                    { name: 'HIV', val: res.hivResult },
+                                    { name: 'HCV', val: res.hcvResult },
+                                    { name: 'Malaria', val: res.malariaResult },
+                                    { name: 'NAT', val: res.natResult }
+                                  ].map((t) => (
+                                    <span
+                                      key={t.name}
+                                      className={`px-1.5 py-0.5 rounded border ${t.val === 'Reactive'
+                                        ? 'bg-rose-50 text-rose-700 border-rose-100'
+                                        : 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                        }`}
+                                    >
+                                      {t.name}: {t.val}
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="px-5 py-3.5 text-center">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase ${hasReactive ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
+                                  }`}>
+                                  {hasReactive ? 'REACTIVE' : 'NON-REACTIVE'}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3.5 font-mono text-slate-400 text-[10px]">{res.recordedBy || '—'}</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+          )}
         </main>
       </div>
 
@@ -1498,122 +1614,6 @@ export default function RegistryDashboard() {
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ── TAB 3: LABORATORY RESULTS (Section II / Table 8) ── */}
-      {tab === 'laboratory' && (
-        <div className="space-y-5 print:hidden fade-in">
-
-          {/* Header block */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex items-center justify-between">
-            <div>
-              <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                <Droplets size={16} className="text-indigo-600" />
-                Laboratory Test Results — Table 8
-              </h3>
-              <p className="text-[10px] text-slate-400 mt-0.5">Manage and encode lab-confirmed blood types and serology TTI test outcomes</p>
-            </div>
-            <button
-              onClick={() => {
-                setLabForm({
-                  donationId: '',
-                  hemoglobinResult: '14.5',
-                  bloodTypeConfirmed: 'O+',
-                  hbsagResult: 'Non-Reactive',
-                  syphilisResult: 'Non-Reactive',
-                  hivResult: 'Non-Reactive',
-                  hcvResult: 'Non-Reactive',
-                  malariaResult: 'Non-Reactive',
-                  natResult: 'Non-Reactive',
-                  othersResult: ''
-                });
-                setLabSaved(false);
-                setShowLabResultModal(true);
-              }}
-              className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer"
-            >
-              <Plus size={13} /> Encode Lab Result
-            </button>
-          </div>
-
-          {/* Lab results table */}
-          <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-xs font-semibold text-slate-650">
-                <thead className="bg-slate-50 text-[10px] font-bold text-slate-450 uppercase tracking-wider text-left">
-                  <tr>
-                    <th className="px-5 py-3">Test ID</th>
-                    <th className="px-5 py-3">Donation ID</th>
-                    <th className="px-5 py-3">Confirmed Type</th>
-                    <th className="px-5 py-3">Hemoglobin</th>
-                    <th className="px-5 py-3">TTI Serology Screen (HBsAg, Syph, HIV, HCV, Malaria, NAT)</th>
-                    <th className="px-5 py-3 text-center">Status</th>
-                    <th className="px-5 py-3">Encoded By</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-xs font-normal text-slate-600">
-                  {(labTestResults || []).length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-5 py-8 text-center text-slate-400 text-[11px]">
-                        No lab results encoded yet. Click <strong>Encode Lab Result</strong> to record one.
-                      </td>
-                    </tr>
-                  ) : (
-                    (labTestResults || []).map((res) => {
-                      const hasReactive = [
-                        res.hbsagResult, res.syphilisResult, res.hivResult,
-                        res.hcvResult, res.malariaResult, res.natResult
-                      ].some(val => val === 'Reactive');
-
-                      return (
-                        <tr key={res.testId} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-5 py-3.5 font-mono font-bold text-slate-900">{res.testId}</td>
-                          <td className="px-5 py-3.5 font-mono text-slate-550">{res.donationId || '—'}</td>
-                          <td className="px-5 py-3.5">
-                            <span className="bg-rose-50 border border-rose-100 text-[#C21C24] font-black rounded px-1.5 py-0.5 text-[9px] font-mono">
-                              {res.bloodTypeConfirmed}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3.5 font-mono text-[11px]">{res.hemoglobinResult} g/dL</td>
-                          <td className="px-5 py-3.5">
-                            <div className="flex flex-wrap gap-1 text-[9px] font-bold">
-                              {[
-                                { name: 'HBsAg', val: res.hbsagResult },
-                                { name: 'Syph', val: res.syphilisResult },
-                                { name: 'HIV', val: res.hivResult },
-                                { name: 'HCV', val: res.hcvResult },
-                                { name: 'Malaria', val: res.malariaResult },
-                                { name: 'NAT', val: res.natResult }
-                              ].map((t) => (
-                                <span
-                                  key={t.name}
-                                  className={`px-1.5 py-0.5 rounded border ${t.val === 'Reactive'
-                                    ? 'bg-rose-50 text-rose-700 border-rose-100'
-                                    : 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                    }`}
-                                >
-                                  {t.name}: {t.val}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                          <td className="px-5 py-3.5 text-center">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase ${hasReactive ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
-                              }`}>
-                              {hasReactive ? 'REACTIVE' : 'NON-REACTIVE'}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3.5 font-mono text-slate-400 text-[10px]">{res.recordedBy || '—'}</td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
         </div>
       )}
 

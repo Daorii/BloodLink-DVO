@@ -476,17 +476,16 @@ export default function Home() {
     }
   };
 
-  const handleLoginSubmit = async (e) => {
+  const handleLoginSubmit = (e) => {
     e.preventDefault();
     if (!email) {
       setLoginError('Email is required.');
       return;
     }
 
-    // loginSystemUser is now async — it calls the Laravel API first
-    const authenticatedUser = await loginSystemUser(email, password);
+    const authenticatedUser = loginSystemUser(email);
     if (!authenticatedUser) {
-      setLoginError('Authentication failed. Invalid email or password.');
+      setLoginError('Authentication failed. Role-associated email not recognized.');
       return;
     }
 
@@ -792,35 +791,6 @@ export default function Home() {
         onLogin={() => setShowModal(true)}
       />
 
-      {/* ── STATS BANNER ── */}
-      <section className="relative z-10 bg-slate-900 py-14 px-6">
-        <div
-          ref={statRef}
-          className={`max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 text-center text-white ${statVisible || reduceMotion ? 'landing-reveal is-in' : 'landing-reveal'}`}
-        >
-          <div className="py-4 md:py-0">
-            <div className="text-3xl md:text-4xl font-extrabold tracking-tight">
-              <CountUp end={45} started={statVisible} /> min
-            </div>
-            <div className="text-slate-300 text-xs mt-1 font-semibold uppercase tracking-wider">Avg. Mobilization Time</div>
-            <div className="text-slate-400 text-[10px] mt-0.5">vs. 4-8 hours manually</div>
-          </div>
-          <div className="border-t md:border-t-0 md:border-l border-white/20 py-4 md:py-0">
-            <div className="text-3xl md:text-4xl font-extrabold tracking-tight">
-              <CountUp end={98} started={statVisible} />%
-            </div>
-            <div className="text-slate-300 text-xs mt-1 font-semibold uppercase tracking-wider">Matching Accuracy</div>
-            <div className="text-slate-400 text-[10px] mt-0.5">Verified donor matching</div>
-          </div>
-          <div className="border-t md:border-t-0 md:border-l border-white/20 py-4 md:py-0">
-            <div className="text-3xl md:text-4xl font-extrabold tracking-tight">
-              <CountUp end={3} started={statVisible} />
-            </div>
-            <div className="text-slate-300 text-xs mt-1 font-semibold uppercase tracking-wider">Partner Facilities</div>
-            <div className="text-slate-400 text-[10px] mt-0.5 font-mono">SPMC · PRC · SNBC</div>
-          </div>
-        </div>
-      </section>
 
       {/* ── CORE WORKFLOW ENGINE ── */}
       <HowItWorks />

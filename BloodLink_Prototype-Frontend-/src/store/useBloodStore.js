@@ -1,7 +1,5 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { apiLogin, apiLogout, apiGetUsers, apiCreateUser, apiUpdateUser, clearToken } from '../services/api';
-import { apiGetHospitals, apiCreateHospital, apiUpdateHospital, apiDeleteHospital } from '../services/api';
 
 const initialDonors = [
   // ── Sample Dataset: Donor Registrationssss ──
@@ -607,32 +605,14 @@ export const useBloodStore = create(
         email: 'admin@bloodlink.dvo',
         hospitalId: null
       },
-      /**
-       * Login — calls the Laravel API first. If the backend is unreachable,
-       * falls back to local-only matching so the prototype still works.
-       * @param {string} email
-       * @param {string} password
-       * @returns {Promise<object|null>} authenticated user or null
-       */
-      loginSystemUser: async (email, password = 'pass123') => {
-        // ── Try API login first ──
-        try {
-          const data = await apiLogin(email, password);
-          if (data.user) {
-            set({ authSystemUser: data.user });
-            return data.user;
-          }
-        } catch (err) {
-          console.warn('[BloodLink] API login failed, falling back to local auth:', err.message);
-        }
-
-        // ── Fallback: local matching (keeps prototype working without backend) ──
+      loginSystemUser: (email) => {
         const emailLower = email.toLowerCase();
         const found = get().users.find(u => u.email.toLowerCase() === emailLower);
         if (found) {
           set({ authSystemUser: found });
           return found;
         }
+        // Fallback for demo flexibility
         let user = null;
         if (emailLower.includes('superadmin')) {
           user = { id: 'USR-001', name: 'DOH Super Admin', role: 'Super Admin', email: 'superadmin@bloodlink.dvo', hospitalId: null };
@@ -653,28 +633,6 @@ export const useBloodStore = create(
         }
         return null;
       },
-      /**
-       * Logout — revokes the API token and clears local auth state.
-       */
-      logoutSystemUser: async () => {
-        try { await apiLogout(); } catch (_) { /* ignore */ }
-        clearToken();
-        set({ authSystemUser: null });
-      },
-      /**
-       * Fetch all users from the Laravel API and replace local state.
-       * Falls back silently if the backend is unreachable.
-       */
-      fetchUsersFromAPI: async () => {
-        try {
-          const data = await apiGetUsers();
-          if (data.users) {
-            set({ users: data.users });
-          }
-        } catch (err) {
-          console.warn('[BloodLink] Could not fetch users from API, using local data:', err.message);
-        }
-      },
       accountFlagged: false,
       arrivedAtFacility: false,
 
@@ -690,67 +648,19 @@ export const useBloodStore = create(
       currentPhase: 1,
 
       // ─── Hospital CRUD ──────────────────────────────────────────────────
-      fetchHospitalsFromAPI: async () => {
-        try {
-          const data = await apiGetHospitals();
-          if (data.hospitals) {
-            set({ hospitals: data.hospitals });
-          }
-        } catch (err) {
-          console.warn('[BloodLink] Could not fetch hospitals from API, using local data:', err.message);
-        }
-      },
-
-      addHospital: async (form) => {
-        // ── Try API first ──
-        try {
-          const data = await apiCreateHospital(form);
-          if (data.hospital) {
-            set((state) => ({ hospitals: [...state.hospitals, data.hospital] }));
-            return;
-          }
-        } catch (err) {
-          console.error('[BloodLink] API createHospital failed, using local fallback:', err.message, err.status || '', err.data || '');
-        }
-        // ── Fallback: local-only ──
+      addHospital: (form) => {
         const id = 'HOSP-' + String(Date.now()).slice(-4);
-        set((state) => ({ hospitals: [...state.hospitals, { id, ...form }] }));
+        const newHospital = { id, ...form };
+        set((state) => ({ hospitals: [...state.hospitals, newHospital] }));
       },
 
-      updateHospital: async (id, form) => {
-        // ── Try API first ──
-        // id is in "HOSP-001" format; extract numeric part
-        const numericId = parseInt(id.replace('HOSP-', ''), 10);
-        if (!isNaN(numericId)) {
-          try {
-            const data = await apiUpdateHospital(numericId, form);
-            if (data.hospital) {
-              set((state) => ({
-                hospitals: state.hospitals.map(h => h.id === id ? { ...h, ...data.hospital } : h)
-              }));
-              return;
-            }
-          } catch (err) {
-            console.error('[BloodLink] API updateHospital failed, using local fallback:', err.message, err.status || '', err.data || '');
-          }
-        }
-        // ── Fallback: local-only ──
+      updateHospital: (id, form) => {
         set((state) => ({
           hospitals: state.hospitals.map(h => h.id === id ? { ...h, ...form } : h)
         }));
       },
 
-      deleteHospital: async (id) => {
-        // ── Try API first ──
-        const numericId = parseInt(id.replace('HOSP-', ''), 10);
-        if (!isNaN(numericId)) {
-          try {
-            await apiDeleteHospital(numericId);
-          } catch (err) {
-            console.error('[BloodLink] API deleteHospital failed, using local fallback:', err.message, err.status || '', err.data || '');
-          }
-        }
-        // Always remove from local state (whether API succeeded or not)
+      deleteHospital: (id) => {
         set((state) => ({
           hospitals: state.hospitals.filter(h => h.id !== id)
         }));
@@ -1142,135 +1052,69 @@ export const useBloodStore = create(
         });
       },
 
-      addUser: async (userForm) => {
+      addUser: (userForm) => {
+        const id = 'USR-' + String(Math.floor(Math.random() * 900) + 100);
         const now = new Date();
 
-        // ── Resolve hospital details locally if Hospital User ──
-        let finalFirstName = userForm.firstName || '';
-        let finalLastName = userForm.lastName || '';
-        let finalEmail = userForm.email || '';
-        let finalContactNumber = userForm.contactNumber || '';
+        set((state) => {
+          let finalFirstName = userForm.firstName || '';
+          let finalLastName = userForm.lastName || '';
+          let finalEmail = userForm.email || '';
+          let finalContactNumber = userForm.contactNumber || '';
 
-        const state = get();
-        let updatedHospitals = state.hospitals;
-        if (userForm.role === 'Hospital User' && userForm.hospitalId) {
-          const targetHosp = state.hospitals.find(h => h.id === userForm.hospitalId);
-          if (targetHosp) {
-            const nameParts = (targetHosp.contact || 'Hospital Admin').split(' ');
-            finalFirstName = nameParts[0] || 'Hospital';
-            finalLastName = nameParts.slice(1).join(' ') || 'Admin';
-            finalEmail = targetHosp.email || finalEmail;
-            finalContactNumber = targetHosp.phone || finalContactNumber;
-            updatedHospitals = state.hospitals.map(h =>
-              h.id === userForm.hospitalId ? { ...h, registrationStatus: 'Active' } : h
-            );
+          // If Hospital User, fetch hospital details and auto-approve the hospital
+          let updatedHospitals = state.hospitals;
+          if (userForm.role === 'Hospital User' && userForm.hospitalId) {
+            const targetHosp = state.hospitals.find(h => h.id === userForm.hospitalId);
+            if (targetHosp) {
+              const nameParts = (targetHosp.contact || 'Hospital Admin').split(' ');
+              finalFirstName = nameParts[0] || 'Hospital';
+              finalLastName = nameParts.slice(1).join(' ') || 'Admin';
+              finalEmail = targetHosp.email || finalEmail;
+              finalContactNumber = targetHosp.phone || finalContactNumber;
+
+              // Automatically mark the affiliated hospital as Active
+              updatedHospitals = state.hospitals.map(h =>
+                h.id === userForm.hospitalId ? { ...h, registrationStatus: 'Active' } : h
+              );
+            }
           }
-        }
 
-        // ── Try API first ──
-        try {
-          const apiData = await apiCreateUser({
+          const newUser = {
+            id,
+            roleId: userForm.roleId || null,
             firstName: finalFirstName,
             lastName: finalLastName,
+            name: `${finalFirstName} ${finalLastName}`.trim(),
             email: finalEmail,
-            password: userForm.passwordHash || 'pass123',
+            passwordHash: userForm.passwordHash || '••••••••',
             contactNumber: finalContactNumber,
-            role: userForm.role || 'Registry Staff',
             status: userForm.status || 'Active',
-            hospitalId: userForm.hospitalId || '',
-          });
+            role: userForm.role || 'Registry Staff',
+            hospitalId: userForm.hospitalId || null,
+            createdAt: now.toLocaleString(),
+            updatedAt: now.toLocaleString()
+          };
 
-          if (apiData.user) {
-            set((s) => ({
-              users: [...s.users, apiData.user],
-              hospitals: updatedHospitals,
-              auditLogs: [{
-                logId: 'LOG-' + Math.floor(100 + Math.random() * 900),
-                userId: s.authSystemUser?.id || 'USR-001',
-                action: `Created new system user ${apiData.user.name} (${apiData.user.role})`,
-                module: 'User Management',
-                recordId: apiData.user.id,
-                oldValue: null,
-                newValue: JSON.stringify({ id: apiData.user.id, role: apiData.user.role, email: apiData.user.email }),
-                performedAt: now.toLocaleString()
-              }, ...s.auditLogs]
-            }));
-            return;
-          }
-        } catch (err) {
-          console.error('[BloodLink] API createUser failed, using local fallback:', err.message, err.status || '', err.data || '');
-        }
-
-        // ── Fallback: local-only ──
-        const id = 'USR-' + String(Math.floor(Math.random() * 900) + 100);
-        const newUser = {
-          id,
-          roleId: userForm.roleId || null,
-          firstName: finalFirstName,
-          lastName: finalLastName,
-          name: `${finalFirstName} ${finalLastName}`.trim(),
-          email: finalEmail,
-          passwordHash: userForm.passwordHash || '••••••••',
-          contactNumber: finalContactNumber,
-          status: userForm.status || 'Active',
-          role: userForm.role || 'Registry Staff',
-          hospitalId: userForm.hospitalId || null,
-          createdAt: now.toLocaleString(),
-          updatedAt: now.toLocaleString()
-        };
-
-        set((s) => ({
-          users: [...s.users, newUser],
-          hospitals: updatedHospitals,
-          auditLogs: [{
-            logId: 'LOG-' + Math.floor(100 + Math.random() * 900),
-            userId: s.authSystemUser?.id || 'USR-001',
-            action: `Created new system user ${newUser.name} (${newUser.role})`,
-            module: 'User Management',
-            recordId: id,
-            oldValue: null,
-            newValue: JSON.stringify({ id, role: newUser.role, email: newUser.email }),
-            performedAt: now.toLocaleString()
-          }, ...s.auditLogs]
-        }));
+          return {
+            users: [...state.users, newUser],
+            hospitals: updatedHospitals,
+            auditLogs: [{
+              logId: 'LOG-' + Math.floor(100 + Math.random() * 900),
+              userId: state.authSystemUser?.id || 'USR-001',
+              action: `Created new system user ${newUser.name} (${newUser.role})`,
+              module: 'User Management',
+              recordId: id,
+              oldValue: null,
+              newValue: JSON.stringify({ id, role: newUser.role, email: newUser.email }),
+              performedAt: now.toLocaleString()
+            }, ...state.auditLogs]
+          };
+        });
       },
 
-      updateUser: async (userId, updatedFields) => {
+      updateUser: (userId, updatedFields) => {
         const now = new Date();
-
-        // ── Try API first ──
-        // userId is in "USR-001" format; extract the numeric part for the API
-        const numericId = parseInt(userId.replace('USR-', ''), 10);
-        if (!isNaN(numericId)) {
-          try {
-            const apiData = await apiUpdateUser(numericId, updatedFields);
-            if (apiData.user) {
-              set((state) => {
-                const updatedUsers = state.users.map(u =>
-                  u.id === userId ? { ...u, ...apiData.user } : u
-                );
-                return {
-                  users: updatedUsers,
-                  auditLogs: [{
-                    logId: 'LOG-' + Math.floor(100 + Math.random() * 900),
-                    userId: state.authSystemUser?.id || 'USR-001',
-                    action: `Updated system user ${apiData.user.name} (${apiData.user.role})`,
-                    module: 'User Management',
-                    recordId: userId,
-                    oldValue: null,
-                    newValue: JSON.stringify({ role: apiData.user.role, email: apiData.user.email, status: apiData.user.status }),
-                    performedAt: now.toLocaleString()
-                  }, ...state.auditLogs]
-                };
-              });
-              return;
-            }
-          } catch (err) {
-            console.warn('[BloodLink] API updateUser failed, using local fallback:', err.message);
-          }
-        }
-
-        // ── Fallback: local-only ──
         set((state) => {
           const roleMap = { 'Super Admin': 'ROLE-001', 'Administrator': 'ROLE-002', 'Registry Staff': 'ROLE-003', 'Blood Bank Staff': 'ROLE-004', 'Issuance Personnel': 'ROLE-005', 'Hospital User': 'ROLE-006' };
           const updatedUsers = state.users.map(u => {
