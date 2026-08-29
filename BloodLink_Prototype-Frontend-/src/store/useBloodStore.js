@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { apiLogin, apiLogout, apiGetUsers, apiCreateUser, apiUpdateUser, clearToken } from '../services/api';
 import { apiGetHospitals, apiCreateHospital, apiUpdateHospital, apiDeleteHospital } from '../services/api';
+import { apiGetDonors, apiCreateDonor, apiUpdateDonor, apiDeleteDonor } from '../services/api';
 
 const initialDonors = [
   // ── Sample Dataset: Donor Registrationssss ──
@@ -695,7 +696,22 @@ export const useBloodStore = create(
       },
 
       // ─── Registry Operations ─────────────────────────────────────────────
-      addDonor: (newDonor) => {
+      fetchDonorsFromAPI: async () => {
+        try {
+          const data = await apiGetDonors();
+          if (data.donors) set({ donors: data.donors });
+        } catch (err) {
+          console.warn('[BloodLink] Could not fetch donors from API:', err.message);
+        }
+      },
+
+      addDonor: async (newDonor) => {
+        try {
+          const data = await apiCreateDonor(newDonor);
+          if (data.donor) { set((s) => ({ donors: [data.donor, ...s.donors] })); return; }
+        } catch (err) {
+          console.error('[BloodLink] API createDonor failed, using local fallback:', err.message, err.status || '');
+        }
         set((state) => ({ donors: [newDonor, ...state.donors] }));
       },
 

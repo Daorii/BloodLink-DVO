@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\DonorController;
 use App\Http\Controllers\HospitalController;
 use App\Http\Controllers\UserController;
 use Illuminate\Http\Request;
@@ -41,4 +42,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/hospitals', [HospitalController::class, 'store']);
     Route::put('/hospitals/{id}', [HospitalController::class, 'update']);
     Route::delete('/hospitals/{id}', [HospitalController::class, 'destroy']);
+
+    // Donor Management (CRUD)
+    Route::get('/donors', [DonorController::class, 'index']);
+    Route::post('/donors', [DonorController::class, 'store']);
+    Route::put('/donors/{id}', [DonorController::class, 'update']);
+    Route::delete('/donors/{id}', [DonorController::class, 'destroy']);
 });

@@ -35,7 +35,7 @@ const ITEMS_PER_PAGE = 5;
 const DEFAULT_HEALTH = [true, true, true, true, true];
 
 export default function RegistryDashboard() {
-  const { donors, inventory, addDonor, updateDonorMedical, donationEvents, authSystemUser, labTestResults, donations, addLabTestResult, isSidebarCollapsed, toggleSidebar } = useBloodStore();
+  const { donors, inventory, addDonor, updateDonorMedical, donationEvents, authSystemUser, labTestResults, donations, addLabTestResult, isSidebarCollapsed, toggleSidebar, fetchDonorsFromAPI } = useBloodStore();
 
   // Dynamically prepare donor lastDonation dates relative to today's date for demo purposes
   const preparedDonors = useMemo(() => {
@@ -145,6 +145,9 @@ export default function RegistryDashboard() {
     malariaResult: 'Non-Reactive',
     natResult: 'Non-Reactive'
   });
+
+  // Load donors from Laravel API on mount
+  useEffect(() => { fetchDonorsFromAPI(); }, []);
 
   useEffect(() => {
     if (editingMedicalDonor) {

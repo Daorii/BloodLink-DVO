@@ -187,7 +187,23 @@ export async function apiUpdateHospital(id, data) {
  * @returns {{ message: string }}
  */
 export async function apiDeleteHospital(id) {
-  return request(`/hospitals/${id}`, {
-    method: 'DELETE',
-  });
+  return request(`/hospitals/${id}`, { method: 'DELETE' });
+}
+
+// ─── Donor Management endpoints ─────────────────────────────────────────
+
+export async function apiGetDonors() {
+  return request('/donors');
+}
+
+export async function apiCreateDonor(data) {
+  return request('/donors', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiUpdateDonor(id, data) {
+  return request(`/donors/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function apiDeleteDonor(id) {
+  return request(`/donors/${id}`, { method: 'DELETE' });
 }
