@@ -82,6 +82,8 @@ export default function AdminDashboard() {
   const granularForecasts = useBloodStore((state) => state.granularForecasts) ?? [];
   const addUser = useBloodStore((state) => state.addUser);
   const updateUser = useBloodStore((state) => state.updateUser);
+  const fetchUsersFromAPI = useBloodStore((state) => state.fetchUsersFromAPI);
+  const fetchHospitalsFromAPI = useBloodStore((state) => state.fetchHospitalsFromAPI);
   const addBloodRequest = useBloodStore((state) => state.addBloodRequest);
   const approveRequest = useBloodStore((state) => state.approveRequest);
   const recommendations = useBloodStore((state) => state.recommendations);
@@ -93,6 +95,12 @@ export default function AdminDashboard() {
   const auditLogs = useBloodStore((state) => state.auditLogs);
   const donationEvents = useBloodStore((state) => state.donationEvents);
   const addDonationEvent = useBloodStore((state) => state.addDonationEvent);
+
+  // Fetch users and hospitals from the Laravel API when the dashboard loads
+  useEffect(() => {
+    fetchUsersFromAPI();
+    fetchHospitalsFromAPI();
+  }, []);
 
   // Role Detection
   const adminRole = authSystemUser?.role || 'Administrator';

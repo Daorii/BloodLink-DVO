@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { apiLogin, apiLogout, apiGetUsers, apiCreateUser, apiUpdateUser, clearToken } from '../services/api';
+import { apiGetHospitals, apiCreateHospital, apiUpdateHospital, apiDeleteHospital } from '../services/api';
 
 const initialDonors = [
   // ── Sample Dataset: Donor Registrationssss ──
@@ -605,33 +607,40 @@ export const useBloodStore = create(
         email: 'admin@bloodlink.dvo',
         hospitalId: null
       },
-      loginSystemUser: (email) => {
+      loginSystemUser: async (email, password) => {
+        // ── Try Laravel API first ──
+        try {
+          const data = await apiLogin(email, password);
+          if (data.user && data.token) {
+            set({ authSystemUser: data.user });
+            return data.user;
+          }
+        } catch (err) {
+          console.warn('[BloodLink] API login failed, using local fallback:', err.message);
+        }
+        // ── Fallback: local matching (for offline/demo use) ──
         const emailLower = email.toLowerCase();
         const found = get().users.find(u => u.email.toLowerCase() === emailLower);
         if (found) {
           set({ authSystemUser: found });
           return found;
         }
-        // Fallback for demo flexibility
-        let user = null;
-        if (emailLower.includes('superadmin')) {
-          user = { id: 'USR-001', name: 'DOH Super Admin', role: 'Super Admin', email: 'superadmin@bloodlink.dvo', hospitalId: null };
-        } else if (emailLower.includes('admin')) {
-          user = { id: 'USR-002', name: 'DOH Medical Officer IV', role: 'Administrator', email: 'admin@bloodlink.dvo', hospitalId: null };
-        } else if (emailLower.includes('registry')) {
-          user = { id: 'USR-003', name: 'Nurse Joy Cruz', role: 'Registry Staff', email: 'registry@bloodlink.dvo', hospitalId: null };
-        } else if (emailLower.includes('bloodbank') || emailLower.includes('bank')) {
-          user = { id: 'USR-004', name: 'RMT Mark Lopez', role: 'Blood Bank Staff', email: 'bloodbank@bloodlink.dvo', hospitalId: null };
-        } else if (emailLower.includes('issuance')) {
-          user = { id: 'USR-005', name: 'SNBC Issuance Officer', role: 'Issuance Personnel', email: 'issuance@bloodlink.dvo', hospitalId: null };
-        } else if (emailLower.includes('hospital') || emailLower.includes('spmc')) {
-          user = { id: 'USR-006', name: 'Dr. Roberto Santos', role: 'Hospital User', email: 'hospital@bloodlink.dvo', hospitalId: 'HOSP-001' };
-        }
-        if (user) {
-          set({ authSystemUser: user });
-          return user;
-        }
         return null;
+      },
+
+      logoutSystemUser: async () => {
+        try { await apiLogout(); } catch (_) {}
+        clearToken();
+        set({ authSystemUser: null });
+      },
+
+      fetchUsersFromAPI: async () => {
+        try {
+          const data = await apiGetUsers();
+          if (data.users) set({ users: data.users });
+        } catch (err) {
+          console.warn('[BloodLink] Could not fetch users from API:', err.message);
+        }
       },
       accountFlagged: false,
       arrivedAtFacility: false,
@@ -648,22 +657,41 @@ export const useBloodStore = create(
       currentPhase: 1,
 
       // ─── Hospital CRUD ──────────────────────────────────────────────────
-      addHospital: (form) => {
+      fetchHospitalsFromAPI: async () => {
+        try {
+          const data = await apiGetHospitals();
+          if (data.hospitals) set({ hospitals: data.hospitals });
+        } catch (err) {
+          console.warn('[BloodLink] Could not fetch hospitals from API:', err.message);
+        }
+      },
+
+      addHospital: async (form) => {
+        try {
+          const data = await apiCreateHospital(form);
+          if (data.hospital) { set((s) => ({ hospitals: [...s.hospitals, data.hospital] })); return; }
+        } catch (err) { console.error('[BloodLink] API createHospital failed:', err.message, err.status || ''); }
         const id = 'HOSP-' + String(Date.now()).slice(-4);
-        const newHospital = { id, ...form };
-        set((state) => ({ hospitals: [...state.hospitals, newHospital] }));
+        set((s) => ({ hospitals: [...s.hospitals, { id, ...form }] }));
       },
 
-      updateHospital: (id, form) => {
-        set((state) => ({
-          hospitals: state.hospitals.map(h => h.id === id ? { ...h, ...form } : h)
-        }));
+      updateHospital: async (id, form) => {
+        const numericId = parseInt(id.replace('HOSP-', ''), 10);
+        if (!isNaN(numericId)) {
+          try {
+            const data = await apiUpdateHospital(numericId, form);
+            if (data.hospital) { set((s) => ({ hospitals: s.hospitals.map(h => h.id === id ? { ...h, ...data.hospital } : h) })); return; }
+          } catch (err) { console.error('[BloodLink] API updateHospital failed:', err.message, err.status || ''); }
+        }
+        set((s) => ({ hospitals: s.hospitals.map(h => h.id === id ? { ...h, ...form } : h) }));
       },
 
-      deleteHospital: (id) => {
-        set((state) => ({
-          hospitals: state.hospitals.filter(h => h.id !== id)
-        }));
+      deleteHospital: async (id) => {
+        const numericId = parseInt(id.replace('HOSP-', ''), 10);
+        if (!isNaN(numericId)) {
+          try { await apiDeleteHospital(numericId); } catch (err) { console.error('[BloodLink] API deleteHospital failed:', err.message); }
+        }
+        set((s) => ({ hospitals: s.hospitals.filter(h => h.id !== id) }));
       },
 
       // ─── Registry Operations ─────────────────────────────────────────────
@@ -1052,103 +1080,94 @@ export const useBloodStore = create(
         });
       },
 
-      addUser: (userForm) => {
-        const id = 'USR-' + String(Math.floor(Math.random() * 900) + 100);
+      addUser: async (userForm) => {
         const now = new Date();
 
-        set((state) => {
-          let finalFirstName = userForm.firstName || '';
-          let finalLastName = userForm.lastName || '';
-          let finalEmail = userForm.email || '';
-          let finalContactNumber = userForm.contactNumber || '';
+        // Resolve hospital details locally if Hospital User
+        const state = get();
+        let finalFirstName = userForm.firstName || '';
+        let finalLastName  = userForm.lastName  || '';
+        let finalEmail     = userForm.email     || '';
+        let finalContact   = userForm.contactNumber || '';
+        let updatedHospitals = state.hospitals;
 
-          // If Hospital User, fetch hospital details and auto-approve the hospital
-          let updatedHospitals = state.hospitals;
-          if (userForm.role === 'Hospital User' && userForm.hospitalId) {
-            const targetHosp = state.hospitals.find(h => h.id === userForm.hospitalId);
-            if (targetHosp) {
-              const nameParts = (targetHosp.contact || 'Hospital Admin').split(' ');
-              finalFirstName = nameParts[0] || 'Hospital';
-              finalLastName = nameParts.slice(1).join(' ') || 'Admin';
-              finalEmail = targetHosp.email || finalEmail;
-              finalContactNumber = targetHosp.phone || finalContactNumber;
-
-              // Automatically mark the affiliated hospital as Active
-              updatedHospitals = state.hospitals.map(h =>
-                h.id === userForm.hospitalId ? { ...h, registrationStatus: 'Active' } : h
-              );
-            }
+        if (userForm.role === 'Hospital User' && userForm.hospitalId) {
+          const hosp = state.hospitals.find(h => h.id === userForm.hospitalId);
+          if (hosp) {
+            const parts = (hosp.contact || 'Hospital Admin').split(' ');
+            finalFirstName = parts[0] || 'Hospital';
+            finalLastName  = parts.slice(1).join(' ') || 'Admin';
+            finalEmail     = hosp.email  || finalEmail;
+            finalContact   = hosp.phone  || finalContact;
+            updatedHospitals = state.hospitals.map(h =>
+              h.id === userForm.hospitalId ? { ...h, registrationStatus: 'Active' } : h
+            );
           }
+        }
 
-          const newUser = {
-            id,
-            roleId: userForm.roleId || null,
-            firstName: finalFirstName,
-            lastName: finalLastName,
-            name: `${finalFirstName} ${finalLastName}`.trim(),
-            email: finalEmail,
-            passwordHash: userForm.passwordHash || '••••••••',
-            contactNumber: finalContactNumber,
-            status: userForm.status || 'Active',
-            role: userForm.role || 'Registry Staff',
-            hospitalId: userForm.hospitalId || null,
-            createdAt: now.toLocaleString(),
-            updatedAt: now.toLocaleString()
-          };
+        const payload = {
+          firstName: finalFirstName, lastName: finalLastName,
+          email: finalEmail, contactNumber: finalContact,
+          password: userForm.password || 'pass123',
+          role: userForm.role || 'Registry Staff',
+          status: userForm.status || 'Active',
+          hospitalId: userForm.hospitalId || null,
+        };
 
-          return {
-            users: [...state.users, newUser],
-            hospitals: updatedHospitals,
-            auditLogs: [{
-              logId: 'LOG-' + Math.floor(100 + Math.random() * 900),
-              userId: state.authSystemUser?.id || 'USR-001',
-              action: `Created new system user ${newUser.name} (${newUser.role})`,
-              module: 'User Management',
-              recordId: id,
-              oldValue: null,
-              newValue: JSON.stringify({ id, role: newUser.role, email: newUser.email }),
-              performedAt: now.toLocaleString()
-            }, ...state.auditLogs]
-          };
-        });
+        // ── Try API first ──
+        try {
+          const data = await apiCreateUser(payload);
+          if (data.user) {
+            set((s) => ({
+              users: [...s.users, data.user],
+              hospitals: updatedHospitals,
+              auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: s.authSystemUser?.id || 'USR-001', action: `Created new system user ${data.user.name} (${data.user.role})`, module: 'User Management', recordId: data.user.id, oldValue: null, newValue: JSON.stringify({ id: data.user.id, role: data.user.role, email: data.user.email }), performedAt: now.toLocaleString() }, ...s.auditLogs]
+            }));
+            return;
+          }
+        } catch (err) {
+          console.error('[BloodLink] API createUser failed, using local fallback:', err.message, err.status || '', err.data || '');
+        }
+
+        // ── Fallback: local-only ──
+        const id = 'USR-' + String(Math.floor(Math.random() * 900) + 100);
+        const newUser = { id, roleId: userForm.roleId || null, firstName: finalFirstName, lastName: finalLastName, name: `${finalFirstName} ${finalLastName}`.trim(), email: finalEmail, contactNumber: finalContact, status: userForm.status || 'Active', role: userForm.role || 'Registry Staff', hospitalId: userForm.hospitalId || null, createdAt: now.toLocaleString(), updatedAt: now.toLocaleString() };
+        set((s) => ({ users: [...s.users, newUser], hospitals: updatedHospitals, auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: s.authSystemUser?.id || 'USR-001', action: `Created new system user ${newUser.name} (${newUser.role})`, module: 'User Management', recordId: id, oldValue: null, newValue: JSON.stringify({ id, role: newUser.role, email: newUser.email }), performedAt: now.toLocaleString() }, ...s.auditLogs] }));
       },
 
-      updateUser: (userId, updatedFields) => {
+      updateUser: async (userId, updatedFields) => {
         const now = new Date();
+        const roleMap = { 'Super Admin': 'ROLE-001', 'Administrator': 'ROLE-002', 'Registry Staff': 'ROLE-003', 'Blood Bank Staff': 'ROLE-004', 'Issuance Personnel': 'ROLE-005', 'Hospital User': 'ROLE-006' };
+
+        // ── Try API first ──
+        const numericId = parseInt(userId.replace('USR-', ''), 10);
+        if (!isNaN(numericId)) {
+          try {
+            const data = await apiUpdateUser(numericId, updatedFields);
+            if (data.user) {
+              set((s) => {
+                const updatedUsers = s.users.map(u => u.id === userId ? { ...u, ...data.user } : u);
+                const target = updatedUsers.find(u => u.id === userId);
+                return { users: updatedUsers, auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: s.authSystemUser?.id || 'USR-001', action: `Updated system user ${target?.name} (${target?.role})`, module: 'User Management', recordId: userId, oldValue: null, newValue: JSON.stringify({ role: target?.role, email: target?.email, status: target?.status }), performedAt: now.toLocaleString() }, ...s.auditLogs] };
+              });
+              return;
+            }
+          } catch (err) {
+            console.error('[BloodLink] API updateUser failed, using local fallback:', err.message, err.status || '', err.data || '');
+          }
+        }
+
+        // ── Fallback: local-only ──
         set((state) => {
-          const roleMap = { 'Super Admin': 'ROLE-001', 'Administrator': 'ROLE-002', 'Registry Staff': 'ROLE-003', 'Blood Bank Staff': 'ROLE-004', 'Issuance Personnel': 'ROLE-005', 'Hospital User': 'ROLE-006' };
           const updatedUsers = state.users.map(u => {
             if (u.id !== userId) return u;
             const firstName = updatedFields.firstName ?? u.firstName;
-            const lastName = updatedFields.lastName ?? u.lastName;
-            const role = updatedFields.role ?? u.role;
-            return {
-              ...u,
-              firstName,
-              lastName,
-              name: `${firstName} ${lastName}`.trim(),
-              email: updatedFields.email ?? u.email,
-              contactNumber: updatedFields.contactNumber ?? u.contactNumber,
-              role,
-              roleId: roleMap[role] ?? u.roleId,
-              status: updatedFields.status ?? u.status,
-              updatedAt: now.toLocaleString(),
-            };
+            const lastName  = updatedFields.lastName  ?? u.lastName;
+            const role      = updatedFields.role      ?? u.role;
+            return { ...u, firstName, lastName, name: `${firstName} ${lastName}`.trim(), email: updatedFields.email ?? u.email, contactNumber: updatedFields.contactNumber ?? u.contactNumber, role, roleId: roleMap[role] ?? u.roleId, status: updatedFields.status ?? u.status, updatedAt: now.toLocaleString() };
           });
           const targetUser = updatedUsers.find(u => u.id === userId);
-          return {
-            users: updatedUsers,
-            auditLogs: [{
-              logId: 'LOG-' + Math.floor(100 + Math.random() * 900),
-              userId: state.authSystemUser?.id || 'USR-001',
-              action: `Updated system user ${targetUser?.name} (${targetUser?.role})`,
-              module: 'User Management',
-              recordId: userId,
-              oldValue: null,
-              newValue: JSON.stringify({ role: targetUser?.role, email: targetUser?.email, status: targetUser?.status }),
-              performedAt: now.toLocaleString()
-            }, ...state.auditLogs]
-          };
+          return { users: updatedUsers, auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: state.authSystemUser?.id || 'USR-001', action: `Updated system user ${targetUser?.name} (${targetUser?.role})`, module: 'User Management', recordId: userId, oldValue: null, newValue: JSON.stringify({ role: targetUser?.role, email: targetUser?.email, status: targetUser?.status }), performedAt: now.toLocaleString() }, ...state.auditLogs] };
         });
       },
 

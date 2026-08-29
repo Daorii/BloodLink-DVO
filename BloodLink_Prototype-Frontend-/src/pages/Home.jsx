@@ -476,16 +476,16 @@ export default function Home() {
     }
   };
 
-  const handleLoginSubmit = (e) => {
+  const handleLoginSubmit = async (e) => {
     e.preventDefault();
     if (!email) {
       setLoginError('Email is required.');
       return;
     }
 
-    const authenticatedUser = loginSystemUser(email);
+    const authenticatedUser = await loginSystemUser(email, password);
     if (!authenticatedUser) {
-      setLoginError('Authentication failed. Role-associated email not recognized.');
+      setLoginError('Authentication failed. Invalid email or password.');
       return;
     }
 
