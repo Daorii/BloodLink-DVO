@@ -18,7 +18,8 @@ class DonationEvent extends Model
     // "EVT-001" format
     public function getEventIdAttribute(): string
     {
-        return 'EVT-' . str_pad((string) $this->event_id, 3, '0', STR_PAD_LEFT);
+        $id = $this->attributes['event_id'] ?? $this->getKey() ?? 0;
+        return 'EVT-' . str_pad((string) $id, 3, '0', STR_PAD_LEFT);
     }
 
     public function getCityMunicipalityAttribute(): string   { return $this->attributes['city_municipality'] ?? ''; }

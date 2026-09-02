@@ -21,6 +21,7 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             HospitalSeeder::class, // must run before UserSeeder (USR-006 has hospital_id = 1)
             UserSeeder::class,
+            DonorRecallSeeder::class,
         ]);
     }
 }

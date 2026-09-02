@@ -217,3 +217,67 @@ export async function apiGetDonationEvents() {
 export async function apiCreateDonationEvent(data) {
   return request('/donation-events', { method: 'POST', body: JSON.stringify(data) });
 }
+
+export async function apiUpdateDonationEvent(id, data) {
+  return request(`/donation-events/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function apiDeleteDonationEvent(id) {
+  return request(`/donation-events/${id}`, { method: 'DELETE' });
+}
+
+// ─── Donations / Record Outcomes endpoints ───────────────────────────────
+
+export async function apiCreateDonation(data) {
+  return request('/donations', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiGetDonations() {
+  return request('/donations');
+}
+
+export async function apiUpdateDonationOutcome(donationId, data) {
+  return request(`/donations/${donationId}/outcome`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+// ─── Lab Test Results endpoints ──────────────────────────────────────────
+
+export async function apiGetLabResults() {
+  return request('/lab-results');
+}
+
+export async function apiCreateLabResult(data) {
+  return request('/lab-results', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiGetLabResultByDonation(donationId) {
+  return request(`/donations/${donationId}/lab-result`);
+}
+
+// ─── Blood Requests endpoints ─────────────────────────────────────────────
+
+export async function apiGetBloodRequests() {
+  return request('/blood-requests');
+}
+
+export async function apiCreateBloodRequest(data) {
+  return request('/blood-requests', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiUpdateBloodRequestStatus(id, data) {
+  return request(`/blood-requests/${id}/status`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+// ─── Blood Issuances endpoints ────────────────────────────────────────────
+
+export async function apiGetBloodIssuances() {
+  return request('/blood-issuances');
+}
+
+export async function apiCreateBloodIssuance(data) {
+  return request('/blood-issuances', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiApproveBloodRelease(issuanceId, data = {}) {
+  return request(`/blood-issuances/${issuanceId}/release`, { method: 'PUT', body: JSON.stringify(data) });
+}

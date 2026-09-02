@@ -1,9 +1,14 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BloodIssuanceController;
+use App\Http\Controllers\BloodRequestController;
+use App\Http\Controllers\DonationController;
 use App\Http\Controllers\DonationEventController;
 use App\Http\Controllers\DonorController;
 use App\Http\Controllers\HospitalController;
+use App\Http\Controllers\DonorRecallController;
+use App\Http\Controllers\LabTestResultController;
 use App\Http\Controllers\UserController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -53,5 +58,32 @@ Route::middleware('auth:sanctum')->group(function () {
     // Donation Events
     Route::get('/donation-events', [DonationEventController::class, 'index']);
     Route::post('/donation-events', [DonationEventController::class, 'store']);
+    Route::put('/donation-events/{id}', [DonationEventController::class, 'update']);
     Route::delete('/donation-events/{id}', [DonationEventController::class, 'destroy']);
+
+    // Donations / Record Outcomes
+    Route::get('/donations', [DonationController::class, 'index']);
+    Route::post('/donations', [DonationController::class, 'store']);
+    Route::put('/donations/{id}/outcome', [DonationController::class, 'updateOutcome']);
+
+    // Lab Test Results
+    Route::get('/lab-results', [LabTestResultController::class, 'index']);
+    Route::post('/lab-results', [LabTestResultController::class, 'store']);
+    Route::get('/donations/{id}/lab-result', [LabTestResultController::class, 'showByDonation']);
+
+    // Donor Recalls
+    Route::get('/recalls', [DonorRecallController::class, 'index']);
+    Route::post('/recalls', [DonorRecallController::class, 'store']);
+    Route::post('/recalls/bulk', [DonorRecallController::class, 'bulk']);
+    Route::put('/recalls/{id}/response', [DonorRecallController::class, 'updateResponse']);
+
+    // Blood Requests
+    Route::get('/blood-requests', [BloodRequestController::class, 'index']);
+    Route::post('/blood-requests', [BloodRequestController::class, 'store']);
+    Route::put('/blood-requests/{id}/status', [BloodRequestController::class, 'updateStatus']);
+
+    // Blood Issuances
+    Route::get('/blood-issuances', [BloodIssuanceController::class, 'index']);
+    Route::post('/blood-issuances', [BloodIssuanceController::class, 'store']);
+    Route::put('/blood-issuances/{id}/release', [BloodIssuanceController::class, 'release']);
 });

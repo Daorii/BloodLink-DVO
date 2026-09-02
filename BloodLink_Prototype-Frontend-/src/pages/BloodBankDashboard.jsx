@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useBloodStore } from '../store/useBloodStore';
 import {
   Archive, Stethoscope, LogOut,
@@ -28,14 +28,70 @@ const emptyUnitForm = {
 };
 
 export default function BloodBankDashboard() {
-  const { donors, inventory, bloodRequests, approveRequest, rejectRequest, updateInventoryUnits, recordBloodUnit, bloodInventory, donations, isSidebarCollapsed, toggleSidebar } = useBloodStore();
-  const [tab, setTab] = useState('inventory'); // 'inventory' | 'requests'
+  const {
+    donors, inventory, bloodRequests, bloodInventory, donations,
+    rejectRequest, updateInventoryUnits, recordBloodUnit,
+    isSidebarCollapsed, toggleSidebar,
+    fetchBloodRequestsFromAPI, fetchBloodIssuancesFromAPI,
+    processBloodRequest, bloodIssuances,
+  } = useBloodStore();
+
+  const [tab, setTab] = useState('inventory');
   const [showUnitForm, setShowUnitForm] = useState(false);
   const [unitForm, setUnitForm] = useState(emptyUnitForm);
   const [unitSaved, setUnitSaved] = useState(false);
   const [donationSearch, setDonationSearch] = useState('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('All');
   const [successModal, setSuccessModal] = useState({ isOpen: false, title: '', message: '' });
+
+  // Process modal state (Blood Bank processes a request)
+  const [processingReq, setProcessingReq] = useState(null); // the request being processed
+  const [processItems, setProcessItems] = useState([]);     // adjusted quantities
+  const [processRemarks, setProcessRemarks] = useState('');
+  const [isPartial, setIsPartial] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [reqSubTab, setReqSubTab] = useState('pending'); // 'pending' | 'ready' | 'history'
+
+  // Load from DB on mount
+  useEffect(() => {
+    fetchBloodRequestsFromAPI();
+    fetchBloodIssuancesFromAPI();
+  }, []);
+
+  // Open process modal — pre-fill quantities from the request items
+  const openProcess = (req) => {
+    setProcessingReq(req);
+    setProcessItems((req.items || []).map(i => ({
+      bloodType: i.bloodType,
+      component: i.component,
+      requested: i.units,
+      quantityIssued: i.units, // default to full
+    })));
+    setProcessRemarks('');
+    setIsPartial(false);
+  };
+
+  const handleProcess = async () => {
+    if (!processingReq) return;
+    setProcessing(true);
+    const result = await processBloodRequest({
+      requestId:  processingReq.requestId,
+      items:      processItems.map(i => ({ bloodType: i.bloodType, component: i.component, quantityIssued: i.quantityIssued })),
+      remarks:    processRemarks,
+      isPartial,
+    });
+    setProcessing(false);
+    setProcessingReq(null);
+    if (result.success) {
+      setSuccessModal({
+        isOpen: true,
+        title: isPartial ? 'Partially Fulfilled!' : 'Blood Units Prepared!',
+        message: `Request ${processingReq.refNo} has been processed and is now Ready for Release. Issuance Personnel will approve the physical dispatch.`,
+      });
+    } else {
+      alert('Failed to process request: ' + result.error);
+    }
+  };
 
   const handleUnitSubmit = (e) => {
     e.preventDefault();
@@ -44,18 +100,14 @@ export default function BloodBankDashboard() {
     setTimeout(() => { setUnitSaved(false); setUnitForm(emptyUnitForm); setShowUnitForm(false); setDonationSearch(''); }, 2000);
   };
 
-  const handleIssue = (refNo) => {
-    approveRequest(refNo);
-    setSuccessModal({
-      isOpen: true,
-      title: 'Blood Units Dispatched!',
-      message: `Requisition ${refNo} has been successfully completed. Physical blood bags were matched, labeled as Issued, and subtracted from active inventory.`
-    });
-  };
+  // Inventory availability check for a blood type + component
+  const availableUnits = (bloodType, component) =>
+    (bloodInventory || []).filter(u => u.bloodType === bloodType && u.component === component && u.inventoryStatus === 'Available').length;
 
-  // Filter requests that are Verified (ready for Blood Bank processing)
+  // Only show requests that Issuance Personnel has already verified
   const pendingRequests = bloodRequests.filter(req => req.status === 'Verified');
-  const pastRequests = bloodRequests.filter(req => req.status === 'Issued' || req.status === 'Approved' || req.status === 'Rejected');
+  const readyRequests   = bloodRequests.filter(req => req.status === 'Ready for Release' || req.status === 'Partially Fulfilled');
+  const historyRequests = bloodRequests.filter(req => req.status === 'Released' || req.status === 'Rejected');
 
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
@@ -393,114 +445,308 @@ export default function BloodBankDashboard() {
 
           {/* TAB 2: ISSUANCE REQUESTS */}
           {tab === 'requests' && (
-            <div className="space-y-6 animate-in fade-in duration-200">
+            <div className="space-y-5 animate-in fade-in duration-200">
 
-              {/* Pending Requests Table */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-                  <h3 className="font-bold text-slate-900 flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
-                    <Clock className="w-4 h-4 text-amber-500" /> Pending Approval ({pendingRequests.length})
-                  </h3>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs font-semibold text-slate-650">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
-                        <th className="px-6 py-3 font-bold">Ref No / Hospital</th>
-                        <th className="px-6 py-3 font-bold text-center">Blood Type</th>
-                        <th className="px-6 py-3 font-bold text-center">Units</th>
-                        <th className="px-6 py-3 font-bold">Clinical Diagnosis</th>
-                        <th className="px-6 py-3 font-bold">Contact Person</th>
-                        <th className="px-6 py-3 text-center font-bold">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {pendingRequests.map(req => (
-                        <tr key={req.refNo} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-6 py-3.5">
-                            <p className="font-mono text-[10px] font-bold text-slate-400">{req.refNo}</p>
-                            <p className="font-bold text-slate-900 mt-0.5">{req.hospital}</p>
-                            <p className="text-[10px] text-slate-400 font-normal mt-0.5">{req.submittedAt}</p>
-                          </td>
-                          <td className="px-6 py-3.5 text-center">
-                            <span className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded text-[10px] font-mono shadow-sm">
-                              {req.patientBloodType || req.bloodType}
-                            </span>
-                          </td>
-                          <td className="px-6 py-3.5 text-center font-bold text-slate-800 text-sm">
-                            {req.units}
-                          </td>
-                          <td className="px-6 py-3.5 font-normal">
-                            <p className="font-semibold text-slate-700">{req.diagnosis || req.notes || 'Routine Clinic Use'}</p>
-                          </td>
-                          <td className="px-6 py-3.5 font-normal">
-                            <p className="font-semibold text-slate-800">{req.contactPerson}</p>
-                            <p className="text-[10px] text-slate-400 mt-0.5">{req.contactNumber}</p>
-                          </td>
-                          <td className="px-6 py-3.5">
-                            <div className="flex items-center justify-center gap-2">
-                              <button
-                                onClick={() => handleIssue(req.refNo)}
-                                className="bg-slate-900 hover:bg-slate-700 text-white px-2.5 py-1.5 rounded-lg font-bold transition-colors shadow-sm flex items-center gap-1 cursor-pointer"
-                              >
-                                <CheckCircle className="w-3.5 h-3.5" /> Issue Blood
-                              </button>
-                              <button
-                                onClick={() => rejectRequest(req.refNo)}
-                                className="bg-white border border-slate-250 text-rose-650 hover:bg-rose-50/50 px-2.5 py-1.5 rounded-lg font-bold transition-colors flex items-center gap-1 cursor-pointer"
-                              >
-                                <XCircle className="w-3.5 h-3.5" /> Reject
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {pendingRequests.length === 0 && (
-                        <tr>
-                          <td colSpan="6" className="px-6 py-8 text-center text-slate-450 font-normal">
-                            No verified blood requests pending bank dispatch.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+              {/* Sub-tab bar */}
+              <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+                {[
+                  { key: 'pending', label: `Pending (${pendingRequests.length})` },
+                  { key: 'ready',   label: `Ready for Release (${readyRequests.length})` },
+                  { key: 'history', label: 'History' },
+                ].map(t => (
+                  <button key={t.key} onClick={() => setReqSubTab(t.key)}
+                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                      reqSubTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                    }`}>
+                    {t.label}
+                  </button>
+                ))}
               </div>
 
-              {/* Processed Requests */}
-              {pastRequests.length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="font-bold text-slate-900 text-sm">Processed Requests Log</h3>
-                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                    <table className="w-full text-left border-collapse text-xs font-semibold text-slate-655">
+              {/* PENDING — Blood Bank reviews and processes */}
+              {reqSubTab === 'pending' && (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                    <h3 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-amber-500" /> Incoming Requests — Awaiting Blood Bank Processing
+                    </h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs font-semibold text-slate-650">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
-                          <th className="px-6 py-3">Ref No</th>
-                          <th className="px-6 py-3">Hospital</th>
-                          <th className="px-6 py-3 text-center">Request Detail</th>
-                          <th className="px-6 py-3">Status</th>
+                          <th className="px-6 py-3">Ref / Hospital</th>
+                          <th className="px-6 py-3">Urgency</th>
+                          <th className="px-6 py-3">Items Requested</th>
+                          <th className="px-6 py-3">Date Needed</th>
+                          <th className="px-6 py-3">Personnel</th>
+                          <th className="px-6 py-3 text-center">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {pastRequests.map(req => (
-                          <tr key={req.refNo}>
-                            <td className="px-6 py-3.5 font-mono text-[10px] font-bold text-slate-400">{req.refNo}</td>
-                            <td className="px-6 py-3.5 font-bold text-slate-900">{req.hospital}</td>
-                            <td className="px-6 py-3.5 text-center font-bold text-slate-800">{req.units}x {req.patientBloodType || req.bloodType}</td>
+                        {pendingRequests.map(req => (
+                          <tr key={req.refNo} className="hover:bg-slate-50/50 transition-colors">
                             <td className="px-6 py-3.5">
-                              {req.status === 'Issued' || req.status === 'Approved' ? (
-                                <span className="text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Issued</span>
-                              ) : (
-                                <span className="text-[#C21C24] bg-rose-50 border border-rose-100 px-2 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1"><XCircle className="w-3 h-3" /> Rejected</span>
-                              )}
+                              <p className="font-mono text-[10px] font-bold text-slate-400">{req.refNo}</p>
+                              <p className="font-bold text-slate-900 mt-0.5">{req.hospital}</p>
+                              <p className="text-[10px] text-slate-400 font-normal">{req.submittedAt}</p>
+                            </td>
+                            <td className="px-6 py-3.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                req.urgency === 'emergency' ? 'bg-red-100 text-red-700' :
+                                req.urgency === 'urgent'    ? 'bg-amber-100 text-amber-700' :
+                                'bg-slate-100 text-slate-600'
+                              }`}>{req.urgency || 'routine'}</span>
+                            </td>
+                            <td className="px-6 py-3.5">
+                              <div className="space-y-0.5">
+                                {(req.items || []).map((item, i) => {
+                                  const avail = availableUnits(item.bloodType, item.component);
+                                  const sufficient = avail >= item.units;
+                                  return (
+                                    <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                                      <span className="font-mono font-bold text-slate-700">{item.bloodType}</span>
+                                      <span className="text-slate-400">·</span>
+                                      <span className="text-slate-600">{item.component}</span>
+                                      <span className="text-slate-400">×{item.units}</span>
+                                      <span className={`ml-1 font-bold ${sufficient ? 'text-emerald-600' : avail > 0 ? 'text-amber-600' : 'text-red-600'}`}>
+                                        ({sufficient ? '✓' : avail > 0 ? '⚠' : '✗'} {avail} avail)
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </td>
+                            <td className="px-6 py-3.5 font-semibold text-slate-700">{req.dateNeeded || '—'}</td>
+                            <td className="px-6 py-3.5 font-normal">
+                              <p className="font-semibold text-slate-800">{req.requestingPersonnel || req.contactPerson || '—'}</p>
+                              <p className="text-[10px] text-slate-400">{req.ward || ''}</p>
+                            </td>
+                            <td className="px-6 py-3.5">
+                              <div className="flex items-center justify-center gap-2">
+                                <button onClick={() => openProcess(req)}
+                                  className="bg-slate-900 hover:bg-slate-700 text-white px-2.5 py-1.5 rounded-lg font-bold transition-colors shadow-sm flex items-center gap-1 cursor-pointer text-[11px]">
+                                  <CheckCircle className="w-3.5 h-3.5" /> Process
+                                </button>
+                                <button onClick={() => rejectRequest(req.refNo)}
+                                  className="bg-white border border-slate-200 text-rose-600 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg font-bold transition-colors flex items-center gap-1 cursor-pointer text-[11px]">
+                                  <XCircle className="w-3.5 h-3.5" /> Reject
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
+                        {pendingRequests.length === 0 && (
+                          <tr><td colSpan="6" className="px-6 py-10 text-center text-slate-400 font-normal text-xs">No pending requests awaiting processing.</td></tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
                 </div>
               )}
+
+              {/* READY FOR RELEASE — waiting for Issuance Personnel approval */}
+              {reqSubTab === 'ready' && (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-100 bg-blue-50/50">
+                    <h3 className="font-bold text-xs uppercase tracking-wider text-blue-600 flex items-center gap-2">
+                      <Clock className="w-4 h-4" /> Ready for Release — Awaiting Issuance Personnel Approval
+                    </h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs font-semibold">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
+                          <th className="px-6 py-3">Ref / Hospital</th>
+                          <th className="px-6 py-3">Items to Release</th>
+                          <th className="px-6 py-3">Status</th>
+                          <th className="px-6 py-3">Prepared</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {readyRequests.map(req => (
+                          <tr key={req.refNo} className="hover:bg-slate-50/50">
+                            <td className="px-6 py-3.5">
+                              <p className="font-mono text-[10px] font-bold text-slate-400">{req.refNo}</p>
+                              <p className="font-bold text-slate-900">{req.hospital}</p>
+                            </td>
+                            <td className="px-6 py-3.5">
+                              <div className="space-y-0.5">
+                                {(req.items || []).map((item, i) => (
+                                  <div key={i} className="text-[10px] text-slate-600">
+                                    <span className="font-mono font-bold text-slate-700">{item.bloodType}</span> · {item.component} ×{item.units}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="px-6 py-3.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                req.status === 'Partially Fulfilled' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                              }`}>{req.status}</span>
+                            </td>
+                            <td className="px-6 py-3.5 text-[10px] text-slate-500">{req.submittedAt}</td>
+                          </tr>
+                        ))}
+                        {readyRequests.length === 0 && (
+                          <tr><td colSpan="4" className="px-6 py-10 text-center text-slate-400 font-normal text-xs">No requests awaiting release approval.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* HISTORY */}
+              {reqSubTab === 'history' && (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                    <h3 className="font-bold text-xs uppercase tracking-wider text-slate-500">Completed Request History</h3>
+                  </div>
+                  <table className="w-full text-left border-collapse text-xs font-semibold">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
+                        <th className="px-6 py-3">Ref</th>
+                        <th className="px-6 py-3">Hospital</th>
+                        <th className="px-6 py-3">Items</th>
+                        <th className="px-6 py-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {historyRequests.map(req => (
+                        <tr key={req.refNo}>
+                          <td className="px-6 py-3.5 font-mono text-[10px] font-bold text-slate-400">{req.refNo}</td>
+                          <td className="px-6 py-3.5 font-bold text-slate-900">{req.hospital}</td>
+                          <td className="px-6 py-3.5">
+                            {(req.items || []).map((it, i) => (
+                              <span key={i} className="text-[10px] text-slate-500 mr-2">{it.bloodType} · {it.component} ×{it.units}</span>
+                            ))}
+                          </td>
+                          <td className="px-6 py-3.5">
+                            {req.status === 'Released' ? (
+                              <span className="text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Released</span>
+                            ) : (
+                              <span className="text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1"><XCircle className="w-3 h-3" /> Rejected</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {historyRequests.length === 0 && (
+                        <tr><td colSpan="4" className="px-6 py-10 text-center text-slate-400 text-xs">No history yet.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PROCESS REQUEST MODAL */}
+          {processingReq && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+              <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl border border-slate-200">
+                {/* Header */}
+                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between items-start">
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Blood Bank Staff · Process Request</p>
+                    <h3 className="font-bold text-slate-900 text-sm mt-0.5">
+                      {processingReq.refNo} — {processingReq.hospital}
+                    </h3>
+                    <div className="flex items-center gap-3 mt-1">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        processingReq.urgency === 'emergency' ? 'bg-red-100 text-red-700' :
+                        processingReq.urgency === 'urgent' ? 'bg-amber-100 text-amber-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>{processingReq.urgency || 'routine'}</span>
+                      <span className="text-[10px] text-slate-500">Needed by: <strong>{processingReq.dateNeeded || '—'}</strong></span>
+                    </div>
+                  </div>
+                  <button onClick={() => setProcessingReq(null)} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Body */}
+                <div className="p-6 overflow-y-auto flex-1 space-y-5">
+
+                  {/* Per-item quantity editor */}
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Items — Adjust Quantity to Issue</p>
+                    <div className="space-y-2">
+                      {processItems.map((item, idx) => {
+                        const avail = availableUnits(item.bloodType, item.component);
+                        const sufficient = avail >= item.requested;
+                        return (
+                          <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-bold text-slate-800 text-xs">{item.bloodType}</span>
+                                <span className="text-slate-400 text-xs">·</span>
+                                <span className="text-slate-700 text-xs font-semibold">{item.component}</span>
+                              </div>
+                              <div className="text-[10px] mt-0.5">
+                                <span className="text-slate-500">Requested: <strong>{item.requested}</strong></span>
+                                <span className="mx-2 text-slate-300">|</span>
+                                <span className={`font-bold ${sufficient ? 'text-emerald-600' : avail > 0 ? 'text-amber-600' : 'text-red-600'}`}>
+                                  {sufficient ? '✓' : avail > 0 ? '⚠' : '✗'} {avail} available in inventory
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="text-[10px] text-slate-500 font-semibold">To Issue:</label>
+                              <input
+                                type="number" min="0" max={item.requested}
+                                value={item.quantityIssued}
+                                onChange={e => {
+                                  const val = Math.min(item.requested, Math.max(0, parseInt(e.target.value) || 0));
+                                  setProcessItems(prev => prev.map((p, i) => i === idx ? { ...p, quantityIssued: val } : p));
+                                  // auto-detect partial
+                                  setIsPartial(processItems.some((p, i) => i === idx ? val < p.requested : p.quantityIssued < p.requested));
+                                }}
+                                className="w-16 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-center focus:outline-none focus:ring-2 focus:ring-slate-400"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Partial fulfillment toggle */}
+                  <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                    <input type="checkbox" id="partial-check" checked={isPartial}
+                      onChange={e => setIsPartial(e.target.checked)}
+                      className="w-4 h-4 accent-amber-600 cursor-pointer" />
+                    <label htmlFor="partial-check" className="text-xs font-bold text-amber-800 cursor-pointer">
+                      Mark as Partially Fulfilled (some items could not be fully supplied)
+                    </label>
+                  </div>
+
+                  {/* Remarks */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Remarks / Notes</label>
+                    <textarea
+                      value={processRemarks}
+                      onChange={e => setProcessRemarks(e.target.value)}
+                      rows={2}
+                      placeholder="Optional notes for this issuance..."
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50 rounded-b-2xl">
+                  <button onClick={() => setProcessingReq(null)}
+                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer">
+                    Cancel
+                  </button>
+                  <button onClick={handleProcess} disabled={processing}
+                    className="px-5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-700 rounded-xl shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50">
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    {processing ? 'Processing...' : (isPartial ? 'Confirm Partial Fulfillment' : 'Confirm & Prepare for Release')}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

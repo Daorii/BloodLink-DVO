@@ -38,6 +38,63 @@ import {
   Calendar,
   X
 } from 'lucide-react';
+
+const DAVAO_PROVINCES = [
+  'Davao del Sur',
+  'Davao del Norte',
+  'Davao Oriental',
+  'Davao de Oro',
+  'Davao Occidental'
+];
+
+const DAVAO_CITIES_MUNICIPALITIES = [
+  'Davao City',
+  'Digos City',
+  'Tagum City',
+  'Panabo City',
+  'Mati City',
+  'Island Garden City of Samal',
+  'Santa Cruz',
+  'Bansalan',
+  'Carmen',
+  'Nabunturan',
+  'Malita',
+  'Hagonoy',
+  'Padada',
+  'Matanao',
+  'Kiblawan',
+  'Sulop',
+  'Asuncion',
+  'Braulio E. Dujali',
+  'Kapalong',
+  'New Corella',
+  'San Isidro',
+  'Santo Tomas',
+  'Talaingod',
+  'Baganga',
+  'Banaybanay',
+  'Boston',
+  'Caraga',
+  'Cateel',
+  'Governor Generoso',
+  'Lupon',
+  'Manay',
+  'Tarragona',
+  'Compostela',
+  'Laak',
+  'Mabini',
+  'Maco',
+  'Maragusan',
+  'Mawab',
+  'Monkayo',
+  'Montevista',
+  'New Bataan',
+  'Pantukan',
+  'Don Marcelino',
+  'Jose Abad Santos',
+  'Santa Maria',
+  'Sarangani'
+];
 import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
 import spmcLogo from '../assets/bloodlinks_logo/spmc-logo.png';
@@ -96,6 +153,8 @@ export default function AdminDashboard() {
   const auditLogs = useBloodStore((state) => state.auditLogs);
   const donationEvents = useBloodStore((state) => state.donationEvents);
   const addDonationEvent = useBloodStore((state) => state.addDonationEvent);
+  const updateDonationEvent = useBloodStore((state) => state.updateDonationEvent);
+  const deleteDonationEvent = useBloodStore((state) => state.deleteDonationEvent);
 
   // Fetch users and hospitals from the Laravel API when the dashboard loads
   useEffect(() => {
@@ -135,9 +194,12 @@ export default function AdminDashboard() {
 
   // Donation Events (Table 6) modal state
   const [showEventModal, setShowEventModal] = useState(false);
+  const [editingEvent, setEditingEvent] = useState(null);
+  const [showProvinceDropdown, setShowProvinceDropdown] = useState(false);
+  const [showCityDropdown, setShowCityDropdown] = useState(false);
   const [eventForm, setEventForm] = useState({
-    province: 'Davao del Sur',
-    cityMunicipality: 'Davao City',
+    province: '',
+    cityMunicipality: '',
     barangayOrganization: '',
     eventDate: new Date().toISOString().slice(0, 10)
   });
@@ -3048,13 +3110,16 @@ export default function AdminDashboard() {
                   </div>
                   <button
                     onClick={() => {
+                      setEditingEvent(null);
                       setEventForm({
-                        province: 'Davao del Sur',
-                        cityMunicipality: 'Davao City',
+                        province: '',
+                        cityMunicipality: '',
                         barangayOrganization: '',
                         eventDate: new Date().toISOString().slice(0, 10)
                       });
                       setEventSaved(false);
+                      setShowProvinceDropdown(false);
+                      setShowCityDropdown(false);
                       setShowEventModal(true);
                     }}
                     className="flex items-center gap-1.5 px-3 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-all shadow-sm"
@@ -3073,7 +3138,7 @@ export default function AdminDashboard() {
                         <th className="px-5 py-3">City / Municipality</th>
                         <th className="px-5 py-3">Barangay / Organization</th>
                         <th className="px-5 py-3">Event Date</th>
-                        <th className="px-5 py-3">Registered By</th>
+                        <th className="px-5 py-3 text-left">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs font-normal text-slate-600">
@@ -3096,7 +3161,37 @@ export default function AdminDashboard() {
                                 {ev.eventDate}
                               </span>
                             </td>
-                            <td className="px-5 py-3.5 font-mono text-slate-450 text-[10px]">{ev.registeredBy || authSystemUser?.username || '—'}</td>
+                            <td className="px-5 py-3.5">
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => {
+                                    setEditingEvent(ev);
+                                    setEventForm({
+                                      province: ev.province || '',
+                                      cityMunicipality: ev.cityMunicipality || '',
+                                      barangayOrganization: ev.barangayOrganization || '',
+                                      eventDate: ev.eventDate || new Date().toISOString().slice(0, 10)
+                                    });
+                                    setShowProvinceDropdown(false);
+                                    setShowCityDropdown(false);
+                                    setShowEventModal(true);
+                                  }}
+                                  className="border border-blue-100 bg-blue-50 text-blue-700 font-bold text-[10px] px-2.5 py-1 rounded hover:bg-blue-100 transition cursor-pointer"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm(`Delete donation event ${ev.eventId} (${ev.barangayOrganization || ev.cityMunicipality})?`)) {
+                                      deleteDonationEvent(ev.eventId);
+                                    }
+                                  }}
+                                  className="border border-slate-200 bg-slate-50 text-slate-700 font-bold text-[10px] px-2.5 py-1 rounded hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 transition cursor-pointer"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         ))
                       )}
@@ -3546,12 +3641,16 @@ export default function AdminDashboard() {
         >
           <div
             className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-md modal-in"
-            onClick={e => e.stopPropagation()}
+            onClick={e => {
+              e.stopPropagation();
+              setShowProvinceDropdown(false);
+              setShowCityDropdown(false);
+            }}
           >
             {/* Modal header */}
             <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-red-50 to-white rounded-t-2xl">
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Admin Tool · Table 6: Donation Events</p>
-              <h4 className="font-bold text-slate-900 text-sm tracking-tight">Create Donation Event</h4>
+              <h4 className="font-bold text-slate-900 text-sm tracking-tight">{editingEvent ? 'Edit Donation Event' : 'Create Donation Event'}</h4>
             </div>
 
             {/* Modal body */}
@@ -3562,36 +3661,90 @@ export default function AdminDashboard() {
                 </div>
               )}
 
-              {/* Province */}
-              <div>
+              {/* Province — Typeable with Filtered Auto-Suggestions Dropdown */}
+              <div className="relative" onClick={e => e.stopPropagation()}>
                 <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">
                   Province <span className="text-rose-500">*</span>
                 </label>
-                <select
+                <input
+                  type="text"
                   value={eventForm.province}
-                  onChange={e => setEventForm(f => ({ ...f, province: e.target.value }))}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setEventForm(f => ({ ...f, province: val }));
+                    setShowProvinceDropdown(val.trim().length > 0);
+                  }}
+                  placeholder="Type province name..."
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:border-slate-800 focus:ring-1 focus:ring-slate-800 outline-none bg-slate-50/50"
-                >
-                  <option value="Davao del Sur">Davao del Sur</option>
-                  <option value="Davao del Norte">Davao del Norte</option>
-                  <option value="Davao Oriental">Davao Oriental</option>
-                  <option value="Davao de Oro">Davao de Oro</option>
-                  <option value="Davao Occidental">Davao Occidental</option>
-                </select>
+                />
+                {showProvinceDropdown && eventForm.province.trim().length > 0 && (
+                  <div 
+                    className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-36 overflow-y-auto divide-y divide-slate-100"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {DAVAO_PROVINCES.filter(p => p.toLowerCase().includes(eventForm.province.toLowerCase())).length > 0 ? (
+                      DAVAO_PROVINCES.filter(p => p.toLowerCase().includes(eventForm.province.toLowerCase())).map(p => (
+                        <button
+                          key={p}
+                          type="button"
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            setEventForm(f => ({ ...f, province: p }));
+                            setShowProvinceDropdown(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-red-50 hover:text-red-700 transition cursor-pointer"
+                        >
+                          {p}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-3 py-2 text-xs text-slate-400">Custom entry: "{eventForm.province}"</div>
+                    )}
+                  </div>
+                )}
               </div>
 
-              {/* City / Municipality */}
-              <div>
+              {/* City / Municipality — Typeable with Filtered Auto-Suggestions Dropdown */}
+              <div className="relative" onClick={e => e.stopPropagation()}>
                 <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">
                   City / Municipality <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={eventForm.cityMunicipality}
-                  onChange={e => setEventForm(f => ({ ...f, cityMunicipality: e.target.value }))}
-                  placeholder="e.g. Davao City"
+                  onChange={e => {
+                    const val = e.target.value;
+                    setEventForm(f => ({ ...f, cityMunicipality: val }));
+                    setShowCityDropdown(val.trim().length > 0);
+                  }}
+                  placeholder="Type city or municipality..."
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:border-slate-800 focus:ring-1 focus:ring-slate-800 outline-none bg-slate-50/50"
                 />
+                {showCityDropdown && eventForm.cityMunicipality.trim().length > 0 && (
+                  <div 
+                    className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-36 overflow-y-auto divide-y divide-slate-100"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {DAVAO_CITIES_MUNICIPALITIES.filter(c => c.toLowerCase().includes(eventForm.cityMunicipality.toLowerCase())).length > 0 ? (
+                      DAVAO_CITIES_MUNICIPALITIES.filter(c => c.toLowerCase().includes(eventForm.cityMunicipality.toLowerCase())).map(c => (
+                        <button
+                          key={c}
+                          type="button"
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            setEventForm(f => ({ ...f, cityMunicipality: c }));
+                            setShowCityDropdown(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-red-50 hover:text-red-700 transition cursor-pointer"
+                        >
+                          {c}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-3 py-2 text-xs text-slate-400">Custom entry: "{eventForm.cityMunicipality}"</div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Barangay / Organization */}
@@ -3624,32 +3777,37 @@ export default function AdminDashboard() {
               {/* Action buttons */}
               <div className="flex gap-2.5 text-xs font-semibold pt-2">
                 <button
-                  onClick={() => { setShowEventModal(false); setEventSaved(false); }}
+                  onClick={() => { setShowEventModal(false); setEventSaved(false); setEditingEvent(null); }}
                   className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 text-slate-650 rounded-lg hover:bg-slate-100 transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => {
-                    if (!eventForm.cityMunicipality.trim() || !eventForm.eventDate.trim()) {
-                      return setNoticeModal({ isOpen: true, title: 'Required Fields Missing', message: 'City/Municipality and Event Date are required.', variant: 'warning' });
+                    if (!eventForm.province.trim() || !eventForm.cityMunicipality.trim() || !eventForm.eventDate.trim()) {
+                      return setNoticeModal({ isOpen: true, title: 'Required Fields Missing', message: 'Province, City/Municipality, and Event Date are required.', variant: 'warning' });
                     }
-                    addDonationEvent({ ...eventForm, registeredBy: authSystemUser?.username || 'admin' });
+                    if (editingEvent) {
+                      updateDonationEvent(editingEvent.eventId || editingEvent.event_id, eventForm);
+                    } else {
+                      addDonationEvent(eventForm);
+                    }
                     setEventSaved(true);
                     setEventForm({
-                      province: 'Davao del Sur',
-                      cityMunicipality: 'Davao City',
+                      province: '',
+                      cityMunicipality: '',
                       barangayOrganization: '',
                       eventDate: new Date().toISOString().slice(0, 10)
                     });
                     setTimeout(() => {
                       setEventSaved(false);
                       setShowEventModal(false);
+                      setEditingEvent(null);
                     }, 1200);
                   }}
                   className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition shadow-sm cursor-pointer"
                 >
-                  Save Event
+                  {editingEvent ? 'Save Changes' : 'Save Event'}
                 </button>
               </div>
             </div>

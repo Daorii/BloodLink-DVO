@@ -21,7 +21,10 @@ import {
   FileText,
   Printer,
   ClipboardList,
-  Stethoscope
+  Stethoscope,
+  Eye,
+  History,
+  ChevronDown
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
@@ -35,15 +38,14 @@ const ITEMS_PER_PAGE = 5;
 const DEFAULT_HEALTH = [true, true, true, true, true];
 
 export default function RegistryDashboard() {
-  const { donors, inventory, addDonor, updateDonorMedical, donationEvents, authSystemUser, labTestResults, donations, addLabTestResult, isSidebarCollapsed, toggleSidebar, fetchDonorsFromAPI, fetchDonationEventsFromAPI } = useBloodStore();
+  const { donors, inventory, addDonor, updateDonorMedical, donationEvents, authSystemUser, labTestResults, donations, recalls, addLabTestResult, isSidebarCollapsed, toggleSidebar, fetchDonorsFromAPI, fetchDonationEventsFromAPI, fetchDonationsFromAPI, fetchLabResultsFromAPI, fetchRecallsFromAPI, dispatchRecallSMS, dispatchBulkRecallSMS } = useBloodStore();
 
   // Dynamically prepare donor lastDonation dates relative to today's date for demo purposes
   const preparedDonors = useMemo(() => {
     return donors.map((d, index) => {
       let lastDon = d.lastDonation;
-      // Force every second donor in the list to have a recent donation (e.g., 30-70 days ago)
-      // so they actively show remaining rest countdowns instead of all being "Ready to Donate"
-      if (index % 2 === 1 && d.status !== 'Deferred') {
+      // If donor does not have a recorded lastDonation date, generate demo offsets
+      if (!lastDon && index % 2 === 1 && d.status !== 'Deferred') {
         const date = new Date();
         const offsetDays = 30 + (index % 4) * 15; // 30, 45, 60, 75 days ago
         date.setDate(date.getDate() - offsetDays);
@@ -104,13 +106,20 @@ export default function RegistryDashboard() {
   const [recallConfirm, setRecallConfirm] = useState({ isOpen: false, donorId: '', donorName: '', isBulk: false });
   const [recallSuccess, setRecallSuccess] = useState({ isOpen: false, message: '', details: null });
   const [noticeModal, setNoticeModal] = useState({ isOpen: false, title: '', message: '', variant: 'warning' });
+  const [viewingDonorProfile, setViewingDonorProfile] = useState(null); // donor object for history modal
+  const [expandedDonations, setExpandedDonations] = useState(new Set()); // which donation cards are open
 
   // Lab Results (Table 8) modal state
   const [showLabResultModal, setShowLabResultModal] = useState(false);
   const [labSaved, setLabSaved] = useState(false);
   const [labDonationSearchQuery, setLabDonationSearchQuery] = useState('');
   const [labForm, setLabForm] = useState({
-    donationId: '',
+    // Step 1  -  who and when
+    donorId: '',
+    donorName: '',
+    eventId: '',
+    donationDate: new Date().toISOString().slice(0, 10),
+    // Step 2  -  results
     hemoglobinResult: '14.5',
     bloodTypeConfirmed: 'O+',
     hbsagResult: 'Non-Reactive',
@@ -123,18 +132,18 @@ export default function RegistryDashboard() {
   });
 
   const [medicalForm, setMedicalForm] = useState({
-    // Table 7 — Donation Record fields
+    // Table 7  -  Donation Record fields
     eventId: 'EVT-001',
-    // Table 6 / 7 shared — Event context
+    // Table 6 / 7 shared  -  Event context
     donationDate: '',
     province: 'Davao del Sur',
     cityMunicipality: 'Davao City',
     barangayOrganization: 'Buhangin',
-    // Table 7 — Screening Outcome
+    // Table 7  -  Screening Outcome
     screeningOutcome: 'Accepted',
     deferralReason: '',
     deferralEndDate: '',
-    // Table 8 — Lab Results
+    // Table 8  -  Lab Results
     bloodType: 'O+',
     rhTyping: 'Positive',
     hemoglobinResult: '14.5',
@@ -150,35 +159,31 @@ export default function RegistryDashboard() {
   useEffect(() => {
     fetchDonorsFromAPI();
     fetchDonationEventsFromAPI();
+    fetchDonationsFromAPI();
+    fetchLabResultsFromAPI();
+    fetchRecallsFromAPI();
   }, []);
 
   useEffect(() => {
     if (editingMedicalDonor) {
-      setMedicalForm({
-        // Table 7 — Donation Record
-        eventId: editingMedicalDonor.eventId || 'EVT-001',
-        // Event context
-        donationDate: editingMedicalDonor.donationDate || new Date().toISOString().slice(0, 10),
-        province: editingMedicalDonor.province || 'Davao del Sur',
-        cityMunicipality: editingMedicalDonor.cityMunicipality || 'Davao City',
-        barangayOrganization: editingMedicalDonor.barangayOrganization || 'Buhangin',
-        // Screening
-        screeningOutcome: editingMedicalDonor.screeningOutcome || 'Accepted',
-        deferralReason: editingMedicalDonor.deferralReason || '',
-        deferralEndDate: editingMedicalDonor.deferralEndDate || '',
-        // Lab Results
-        bloodType: editingMedicalDonor.bloodType || 'O+',
-        rhTyping: editingMedicalDonor.rhTyping || 'Positive',
-        hemoglobinResult: editingMedicalDonor.hemoglobinResult || '14.5',
-        hbsagResult: editingMedicalDonor.hbsagResult || 'Non-Reactive',
-        syphilisResult: editingMedicalDonor.syphilisResult || 'Non-Reactive',
-        hivResult: editingMedicalDonor.hivResult || 'Non-Reactive',
-        hcvResult: editingMedicalDonor.hcvResult || 'Non-Reactive',
-        malariaResult: editingMedicalDonor.malariaResult || 'Non-Reactive',
-        natResult: editingMedicalDonor.natResult || 'Non-Reactive'
-      });
+      // Pull the donor's actual donation record (not the donor object, which doesn't have event/outcome fields)
+      const donorNumId = parseInt(String(editingMedicalDonor.id ?? '').replace(/^D0*/i, ''), 10);
+      const existingDonation = (donations || []).find(d =>
+        parseInt(String(d.donorId ?? d.donor_id ?? ''), 10) === donorNumId
+      );
+      setMedicalForm(prev => ({
+        ...prev,
+        eventId: existingDonation?.eventId ?? existingDonation?.event_id ?? '',
+        donationDate: existingDonation?.donationDate ?? existingDonation?.donation_date ?? '',
+        province: existingDonation?.province ?? '',
+        cityMunicipality: existingDonation?.cityMunicipality ?? existingDonation?.city_municipality ?? '',
+        barangayOrganization: existingDonation?.barangayOrganization ?? existingDonation?.barangay_organization ?? '',
+        screeningOutcome: existingDonation?.screeningOutcome ?? existingDonation?.screening_outcome ?? 'Accepted',
+        deferralReason: existingDonation?.deferralReason ?? existingDonation?.deferral_reason ?? '',
+        deferralEndDate: existingDonation?.deferralEndDate ?? existingDonation?.deferral_end_date ?? '',
+      }));
     }
-  }, [editingMedicalDonor]);
+  }, [editingMedicalDonor, donations]);
 
   // Live countdown state for real-time donor rest interval ticking
   const [now, setNow] = useState(new Date());
@@ -368,7 +373,7 @@ export default function RegistryDashboard() {
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-800 font-sans antialiased print:bg-white print:text-black">
 
-      {/* ── SIDEBAR ── */}
+      {/*  -  -  - Ã‚  -  -  -  - Ã‚  -  SIDEBAR  -  -  - Ã‚  -  -  -  - Ã‚  -  */}
       <aside className={`sidebar flex flex-col justify-between border-r border-slate-200 bg-white print:hidden ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
         <div id="registry-sidebar" className="sidebar-inner w-full flex flex-col justify-between">
           <div>
@@ -466,7 +471,7 @@ export default function RegistryDashboard() {
         </div>
       </aside>
 
-      {/* ── CONTENT AREA ── */}
+      {/*  -  -  - Ã‚  -  -  -  - Ã‚  -  CONTENT AREA  -  -  - Ã‚  -  -  -  - Ã‚  -  */}
       <div className={`content-area flex flex-col flex-1 h-screen bg-slate-50 print:hidden ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
 
         {/* Top Header Bar */}
@@ -501,7 +506,7 @@ export default function RegistryDashboard() {
 
         <main className="p-8 flex-1 space-y-6 print:p-0">
 
-          {/* ── TAB 1: DONOR REGISTRY ── */}
+          {/*  -  -  - Ã‚  -  -  -  - Ã‚  -  TAB 1: DONOR REGISTRY  -  -  - Ã‚  -  -  -  - Ã‚  -  */}
           {tab === 'registry' && (
             <div className="space-y-5 print:hidden">
               <div className="flex items-center justify-between">
@@ -622,7 +627,31 @@ export default function RegistryDashboard() {
                           <td className="px-5 py-3.5 text-center">
                             <div className="flex items-center justify-center gap-2">
                               <button
-                                onClick={() => setEditingMedicalDonor(donor)}
+                                onClick={() => setViewingDonorProfile(donor)}
+                                title="View donation history"
+                                className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors cursor-pointer border border-indigo-100"
+                              >
+                                <Eye className="w-3.5 h-3.5" /> View
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const donorNumId = parseInt(String(donor.id ?? '').replace(/^D0*/i, ''), 10);
+                                  // Reliable check: the API returns hasLabResult on every donation record
+                                  const hasLab = (donations || []).some(d => {
+                                    const dDonorId = parseInt(String(d.donorId ?? d.donor_id ?? ''), 10);
+                                    return dDonorId === donorNumId && d.hasLabResult === true;
+                                  });
+                                  if (!hasLab) {
+                                    setNoticeModal({
+                                      isOpen: true,
+                                      title: 'No Lab Results Yet',
+                                      message: 'Lab results must be recorded first under the Laboratory Results tab before setting a screening outcome for this donor.',
+                                      variant: 'warning'
+                                    });
+                                    return;
+                                  }
+                                  setEditingMedicalDonor(donor);
+                                }}
                                 className="bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
                               >
                                 <Stethoscope className="w-3.5 h-3.5" /> Record Outcomes
@@ -674,7 +703,7 @@ export default function RegistryDashboard() {
             </div>
           )}
 
-          {/* ── TAB 2: RECALL OPERATIONS ── */}
+          {/*  -  -  - Ã‚  -  -  -  - Ã‚  -  TAB 2: RECALL OPERATIONS  -  -  - Ã‚  -  -  -  - Ã‚  -  */}
           {tab === 'recall' && (
             <div className="space-y-5 print:hidden">
 
@@ -691,7 +720,7 @@ export default function RegistryDashboard() {
                 </p>
               </div>
 
-              {/* Recall Controls Row */}
+              {/* call Controls Row */}
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <h3 className="text-base font-bold text-slate-900">Eligible Shortage Donors</h3>
@@ -749,7 +778,7 @@ export default function RegistryDashboard() {
                   </label>
                   {hasSelection && (
                     <span className="text-[10px] text-slate-400 font-semibold">
-                      — {selectedRecallIds.length} of {filteredRecallDonors.length} selected
+                       -  {selectedRecallIds.length} of {filteredRecallDonors.length} selected
                     </span>
                   )}
                 </div>
@@ -865,7 +894,7 @@ export default function RegistryDashboard() {
                             <div className="flex flex-col items-center gap-1">
                               {isSoon && (
                                 <span className="text-[9px] font-bold text-orange-600 uppercase tracking-wide animate-pulse">
-                                  ● Soon
+                                   -  -  - Ã¢â‚¬ Ãƒâ€šÃ‚  Soon
                                 </span>
                               )}
                               <button
@@ -935,10 +964,87 @@ export default function RegistryDashboard() {
                   </div>
                 )}
               </div>
+
+              {/* Recall Dispatch History */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-xs text-slate-800">Recall Dispatch History</h4>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{recalls.length} record(s) â€” pulled from database</p>
+                  </div>
+                  <button onClick={fetchRecallsFromAPI} className="text-[10px] text-slate-400 hover:text-slate-700 font-semibold flex items-center gap-1 cursor-pointer transition-colors">
+                    <RefreshCw className="w-3 h-3" /> Refresh
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-semibold text-slate-650 border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-100 uppercase text-[9px] text-slate-400 tracking-wider">
+                        <th className="px-5 py-3">Recall ID</th>
+                        <th className="px-5 py-3">Donor</th>
+                        <th className="px-5 py-3">Blood Type</th>
+                        <th className="px-5 py-3">Contact</th>
+                        <th className="px-5 py-3">Recall Date</th>
+                        <th className="px-5 py-3">Reason</th>
+                        <th className="px-5 py-3 text-center">SMS Status</th>
+                        <th className="px-5 py-3 text-center">Response</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {recalls.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-5 py-8 text-center text-slate-400 text-[11px]">
+                            <RefreshCw className="w-5 h-5 mx-auto mb-1.5 opacity-20" />
+                            No recalls dispatched yet. Use the table above to send SMS recall alerts.
+                          </td>
+                        </tr>
+                      ) : (
+                        recalls.map(r => (
+                          <tr key={r.recallId} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-5 py-3 font-mono font-bold text-slate-400 text-[10px]">
+                              REC-{String(r.recallId ?? r.recall_id ?? '').padStart(3,'0')}
+                            </td>
+                            <td className="px-5 py-3">
+                              <p className="font-bold text-slate-800">{r.donorName ?? '-'}</p>
+                            </td>
+                            <td className="px-5 py-3">
+                              <span className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded text-[10px] font-mono">
+                                {r.bloodType ?? '-'}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 font-mono text-slate-500 text-[10px]">{r.donorPhone ?? '-'}</td>
+                            <td className="px-5 py-3 font-mono text-slate-500 text-[10px]">{r.recallDate ?? '-'}</td>
+                            <td className="px-5 py-3 text-slate-600 text-[10px]">{r.recallReason ?? 'Critical Shortage Match'}</td>
+                            <td className="px-5 py-3 text-center">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                r.smsStatus === 'Sent' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : r.smsStatus === 'Failed' ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                : 'bg-amber-50 text-amber-700 border border-amber-200'
+                              }`}>
+                                {r.smsStatus ?? 'Pending'}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 text-center">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                                r.donorResponse === 'Committed' ? 'text-emerald-700'
+                                : r.donorResponse === 'No Response' ? 'text-slate-400'
+                                : 'text-slate-300'
+                              }`}>
+                                {r.donorResponse ?? 'â€”'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
             </div>
           )}
 
-          {/* ── TAB 3: LABORATORY RESULTS (Section II / Table 8) ── */}
+          {/*  -  -  - Ã‚  -  -  -  - Ã‚  -  TAB 3: LABORATORY RESULTS (Section II / Table 8)  -  -  - Ã‚  -  -  -  - Ã‚  -  */}
           {tab === 'laboratory' && (
             <div className="space-y-5 print:hidden fade-in">
 
@@ -947,14 +1053,17 @@ export default function RegistryDashboard() {
                 <div>
                   <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
                     <Droplets size={16} className="text-indigo-600" />
-                    Laboratory Test Results — Table 8
+                    Laboratory Test Results  -  Table 8
                   </h3>
                   <p className="text-[10px] text-slate-400 mt-0.5">Manage and encode lab-confirmed blood types and serology TTI test outcomes</p>
                 </div>
                 <button
                   onClick={() => {
                     setLabForm({
-                      donationId: '',
+                      donorId: '',
+                      donorName: '',
+                      eventId: '',
+                      donationDate: new Date().toISOString().slice(0, 10),
                       hemoglobinResult: '14.5',
                       bloodTypeConfirmed: 'O+',
                       hbsagResult: 'Non-Reactive',
@@ -974,81 +1083,94 @@ export default function RegistryDashboard() {
                 </button>
               </div>
 
-              {/* Lab results table */}
-              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-slate-200 text-xs font-semibold text-slate-650">
-                    <thead className="bg-slate-50 text-[10px] font-bold text-slate-450 uppercase tracking-wider text-left">
-                      <tr>
-                        <th className="px-5 py-3">Test ID</th>
-                        <th className="px-5 py-3">Donation ID</th>
-                        <th className="px-5 py-3">Confirmed Type</th>
-                        <th className="px-5 py-3">Hemoglobin</th>
-                        <th className="px-5 py-3">TTI Serology Screen (HBsAg, Syph, HIV, HCV, Malaria, NAT)</th>
-                        <th className="px-5 py-3 text-center">Status</th>
-                        <th className="px-5 py-3">Encoded By</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-xs font-normal text-slate-600">
-                      {(labTestResults || []).length === 0 ? (
-                        <tr>
-                          <td colSpan={7} className="px-5 py-8 text-center text-slate-400 text-[11px]">
-                            No lab results encoded yet. Click <strong>Encode Lab Result</strong> to record one.
-                          </td>
-                        </tr>
-                      ) : (
-                        (labTestResults || []).map((res) => {
-                          const hasReactive = [
-                            res.hbsagResult, res.syphilisResult, res.hivResult,
-                            res.hcvResult, res.malariaResult, res.natResult
-                          ].some(val => val === 'Reactive');
-
-                          return (
-                            <tr key={res.testId} className="hover:bg-slate-50/50 transition-colors">
-                              <td className="px-5 py-3.5 font-mono font-bold text-slate-900">{res.testId}</td>
-                              <td className="px-5 py-3.5 font-mono text-slate-550">{res.donationId || '—'}</td>
-                              <td className="px-5 py-3.5">
-                                <span className="bg-rose-50 border border-rose-100 text-[#C21C24] font-black rounded px-1.5 py-0.5 text-[9px] font-mono">
-                                  {res.bloodTypeConfirmed}
-                                </span>
-                              </td>
-                              <td className="px-5 py-3.5 font-mono text-[11px]">{res.hemoglobinResult} g/dL</td>
-                              <td className="px-5 py-3.5">
-                                <div className="flex flex-wrap gap-1 text-[9px] font-bold">
-                                  {[
-                                    { name: 'HBsAg', val: res.hbsagResult },
-                                    { name: 'Syph', val: res.syphilisResult },
-                                    { name: 'HIV', val: res.hivResult },
-                                    { name: 'HCV', val: res.hcvResult },
-                                    { name: 'Malaria', val: res.malariaResult },
-                                    { name: 'NAT', val: res.natResult }
-                                  ].map((t) => (
-                                    <span
-                                      key={t.name}
-                                      className={`px-1.5 py-0.5 rounded border ${t.val === 'Reactive'
-                                        ? 'bg-rose-50 text-rose-700 border-rose-100'
-                                        : 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                        }`}
-                                    >
-                                      {t.name}: {t.val}
-                                    </span>
-                                  ))}
-                                </div>
-                              </td>
-                              <td className="px-5 py-3.5 text-center">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase ${hasReactive ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
-                                  }`}>
-                                  {hasReactive ? 'REACTIVE' : 'NON-REACTIVE'}
-                                </span>
-                              </td>
-                              <td className="px-5 py-3.5 font-mono text-slate-400 text-[10px]">{res.recordedBy || '—'}</td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+              {/* Lab results cards */}
+              <div className="space-y-2">
+                {(labTestResults || []).length === 0 ? (
+                  <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-slate-400 shadow-sm">
+                    <Droplets className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                    <p className="text-xs font-semibold">No lab results encoded yet.</p>
+                    <p className="text-[10px] mt-1">Click <strong>Encode Lab Result</strong> to add the first record.</p>
+                  </div>
+                ) : (
+                  (labTestResults || []).map((res) => {
+                    const ttiTests = [
+                      { name: 'HBsAg',    val: res.hbsagResult    ?? res.hbsag_result },
+                      { name: 'Syphilis', val: res.syphilisResult  ?? res.syphilis_result },
+                      { name: 'HIV',      val: res.hivResult       ?? res.hiv_result },
+                      { name: 'HCV',      val: res.hcvResult       ?? res.hcv_result },
+                      { name: 'Malaria',  val: res.malariaResult   ?? res.malaria_result },
+                      { name: 'NAT',      val: res.natResult       ?? res.nat_result },
+                    ];
+                    const hasReactive = ttiTests.some(t => t.val === 'Reactive');
+                    return (
+                      <div key={res.testId} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden hover:border-slate-300 transition-colors">
+                        {/* Card header */}
+                        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/60">
+                          <div className="flex items-center gap-4 flex-wrap">
+                            <div>
+                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Test ID</span>
+                              <span className="font-mono font-bold text-slate-800 text-xs">{res.testId}</span>
+                            </div>
+                            <div className="w-px h-6 bg-slate-200" />
+                            <div>
+                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Donor</span>
+                              <span className="font-semibold text-slate-700 text-xs">{res.donorName || '-'}</span>
+                            </div>
+                            <div className="w-px h-6 bg-slate-200" />
+                            <div>
+                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Donation</span>
+                              <span className="font-mono text-slate-600 text-xs">DON-{String(res.donationId ?? res.donation_id ?? '').padStart(3,'0')}</span>
+                            </div>
+                            <div className="w-px h-6 bg-slate-200" />
+                            <div>
+                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Blood Type</span>
+                              <span className="bg-rose-50 border border-rose-100 text-[#C21C24] font-black rounded px-2 py-0.5 text-[10px] font-mono">
+                                {res.bloodTypeConfirmed ?? res.blood_type_confirmed ?? '-'}
+                              </span>
+                            </div>
+                            <div className="w-px h-6 bg-slate-200" />
+                            <div>
+                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Hemoglobin</span>
+                              <span className="font-mono font-semibold text-slate-700 text-xs">{res.hemoglobinResult ?? res.hemoglobin_result ?? '-'} g/dL</span>
+                            </div>
+                          </div>
+                          <span className={`px-3 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider border ${
+                            hasReactive
+                              ? 'bg-rose-50 text-rose-700 border-rose-200'
+                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          }`}>
+                            {hasReactive ? '! Reactive' : 'All Non-Reactive'}
+                          </span>
+                        </div>
+                        {/* TTI pills row */}
+                        <div className="px-5 py-3 flex items-center gap-2 flex-wrap">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mr-1">TTI Screen:</span>
+                          {ttiTests.map(t => (
+                            <span key={t.name} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border ${
+                              t.val === 'Reactive'
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : t.val
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-slate-50 text-slate-400 border-slate-200'
+                            }`}>
+                              <span className="text-[9px] font-normal opacity-60">{t.name}</span>
+                              <span className="font-extrabold">{t.val === 'Reactive' ? 'R' : t.val ? 'NR' : '-'}</span>
+                            </span>
+                          ))}
+                          {res.othersResult && (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border bg-slate-50 text-slate-500 border-slate-200">
+                              <span className="text-[9px] font-normal opacity-60">Others</span>
+                              <span>{res.othersResult}</span>
+                            </span>
+                          )}
+                          <span className="ml-auto text-[9px] text-slate-400 font-mono">
+                            Encoded: {res.createdAt ? new Date(res.createdAt).toLocaleDateString() : '-'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
 
             </div>
@@ -1056,706 +1178,489 @@ export default function RegistryDashboard() {
         </main>
       </div>
 
-      {/* ── PRINT-ONLY DHQ DOCUMENT STRUCTURE (Official SNBC-M 3-Page Form) ── */}
-      {activeDhqDonor && (
-        <div className="hidden print:block bg-white text-black p-0 m-0 font-sans text-[10px] leading-tight snbc-print-document">
-          <style>{`
-            @media print {
-              @page {
-                size: portrait;
-                margin: 0.4in;
-              }
-              body * {
-                visibility: hidden !important;
-              }
-              .snbc-print-document, .snbc-print-document * {
-                visibility: visible !important;
-              }
-              .snbc-print-document {
-                position: absolute !important;
-                left: 0 !important;
-                top: 0 !important;
-                width: 100% !important;
-                display: block !important;
-              }
-              .print-page {
-                page-break-after: always;
-                page-break-inside: avoid;
-                min-height: 9.5in;
-                position: relative;
-              }
-              .print-page:last-child {
-                page-break-after: avoid;
-              }
+      {/* SMS RECALL CONFIRMATION & SUCCESS MODALS */}
+      <ConfirmationModal
+        isOpen={recallConfirm.isOpen}
+        title={recallConfirm.isBulk ? "Dispatch Bulk Recall?" : "Dispatch Recall SMS?"}
+        message={recallConfirm.isBulk 
+          ? `This will dispatch recall alerts to all ${recallConfirm.donorName} via Semaphore Gateway. Please confirm to proceed.`
+          : `This will dispatch a recall SMS to ${recallConfirm.donorName}. Please confirm to proceed.`}
+        confirmText="Confirm"
+        cancelText="Cancel"
+        variant="warning"
+        onConfirm={async () => {
+          const donorName = recallConfirm.donorName;
+          const isBulk = recallConfirm.isBulk;
+          const donorId = recallConfirm.donorId;
+          setRecallConfirm({ isOpen: false, donorId: '', donorName: '', isBulk: false });
+          try {
+            if (isBulk) {
+              await dispatchBulkRecallSMS(selectedRecallIds);
+              setSelectedRecallIds([]);
+              setRecallSuccess({ isOpen: true, message: `Bulk SMS recall dispatched to ${donorName} via Semaphore Gateway.` });
+            } else {
+              await dispatchRecallSMS(donorId);
+              setRecallSuccess({ isOpen: true, message: `Recall SMS dispatched to ${donorName} via Semaphore Gateway.` });
             }
-            .snbc-table th, .snbc-table td {
-              border: 1px solid black !important;
-              padding: 3px 5px !important;
-            }
-          `}</style>
+            fetchRecallsFromAPI(); // refresh history
+          } catch {
+            setRecallSuccess({ isOpen: true, message: 'Recall recorded locally. (API error â€” check connection.)' });
+          }
+        }}
+        onCancel={() => setRecallConfirm({ isOpen: false, donorId: '', donorName: '', isBulk: false })}
+      />
 
-          {/* ── PAGE 1: Section I-A & Section I-B (Q1-13) ── */}
-          <div className="print-page flex flex-col justify-between">
-            <div>
-              {/* Header Row */}
-              <div className="flex items-center justify-between border-b border-black pb-2 mb-3">
+      <SuccessModal
+        isOpen={recallSuccess.isOpen}
+        title="Dispatched Successfully"
+        message={recallSuccess.message}
+        confirmText="Acknowledge & Close"
+        onClose={() => setRecallSuccess({ isOpen: false, message: '' })}
+      />
+
+
+      {/* DONOR PROFILE / HISTORY MODAL */}
+      {viewingDonorProfile && (() => {
+        const donor = viewingDonorProfile;
+        const donorNumId = parseInt(String(donor.id ?? '').replace(/^D0*/i, ''), 10);
+        const donorDonations = (donations || [])
+          .filter(d => parseInt(String(d.donorId ?? d.donor_id ?? ''), 10) === donorNumId)
+          .sort((a, b) => new Date(b.donationDate ?? b.donation_date ?? 0) - new Date(a.donationDate ?? a.donation_date ?? 0));
+        // Build a set of numeric donation IDs this donor has
+        const donorDonationNumericIds = new Set(donorDonations.map(d => parseInt(String(d.donationId ?? d.donation_id ?? '').replace(/^DON-0*/i, ''), 10)));
+        // Match lab results: first try direct donorId match (API returns it), fallback to donation-chain match
+        const donorLabs = (labTestResults || []).filter(l => {
+          const labDirectDonorId = parseInt(String(l.donorId ?? l.donor_id ?? ''), 10);
+          if (!isNaN(labDirectDonorId) && labDirectDonorId === donorNumId) return true;
+          // Fallback: match via donation IDs
+          const labDonId = parseInt(String(l.donationId ?? l.donation_id ?? ''), 10);
+          return donorDonationNumericIds.has(labDonId);
+        });
+        // Also include locally-saved results matched by donorId string
+        const donorLabsWithLocal = donorLabs.filter(Boolean);
+        return (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full border border-black flex items-center justify-center font-bold text-[8px] text-center leading-none">
-                    DOH<br />SEAL
-                  </div>
-                  <div className="w-12 h-12 rounded-full border border-black flex items-center justify-center font-bold text-[8px] text-center leading-none">
-                    SNBC<br />SEAL
+                  <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center">
+                    <History className="w-4 h-4 text-indigo-600" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold uppercase">Republic of the Philippines</p>
-                    <p className="text-[10px] font-bold uppercase">Department of Health</p>
-                    <p className="text-[9px]">Davao Center for Health Development</p>
-                    <p className="text-[10px] font-extrabold uppercase text-red-650">SUB-NATIONAL BLOOD CENTER - MINDANAO</p>
+                    <h3 className="font-bold text-slate-900 text-sm">{donor.name}</h3>
+                    <p className="text-[10px] text-slate-400 font-semibold">
+                      {donor.id} &middot; {donor.bloodType || 'Unknown'} &middot; {donor.status || 'Active'}
+                    </p>
                   </div>
                 </div>
-                <div className="flex flex-col items-end gap-1">
-                  <div className="text-[8px] font-bold text-right leading-none">
-                    Sleep: _________<br />
-                    Meal: _________<br />
-                    Meds: _________<br />
-                    Allergies: ______
+                <button onClick={() => { setViewingDonorProfile(null); setExpandedDonations(new Set()); }} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Donor Info Strip */}
+              <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 grid grid-cols-4 gap-3 text-[10px] flex-shrink-0">
+                {[
+                  { label: 'Date of Birth', value: donor.dateOfBirth || donor.dob || '-' },
+                  { label: 'Sex', value: donor.sex || donor.gender || '-' },
+                  { label: 'Contact', value: donor.contact || donor.phone || '-' },
+                  { label: 'Address', value: donor.address || '-' },
+                ].map(({ label, value }) => (
+                  <div key={label}>
+                    <span className="block text-slate-400 uppercase tracking-wider mb-0.5">{label}</span>
+                    <span className="font-semibold text-slate-700">{value}</span>
                   </div>
-                  <div className="border border-black px-4 py-2 text-[9px] font-bold text-center uppercase tracking-tight">
-                    Place Barcode Label Here
-                  </div>
+                ))}
+              </div>
+
+              {/* Donation History */}
+              <div className="overflow-y-auto flex-1 p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-[9px] font-extrabold uppercase tracking-widest text-white bg-indigo-600 px-2 py-0.5 rounded">History</span>
+                  <span className="text-xs font-bold text-slate-700">Donation Records</span>
+                  <span className="text-[10px] text-slate-400 ml-auto">{donorDonations.length} record(s) total</span>
                 </div>
-              </div>
 
-              {/* Title */}
-              <div className="text-center mb-3">
-                <h2 className="text-sm font-black uppercase tracking-wider">BLOOD DONOR’S HEALTH QUESTIONNAIRE</h2>
-              </div>
-
-              {/* Date and Venue lines */}
-              <div className="grid grid-cols-2 gap-4 mb-3 text-[10px] font-bold">
-                <div className="flex gap-1">
-                  <span>DATE:</span>
-                  <span className="border-b border-black flex-1 font-mono font-normal pl-2">{new Date().toLocaleDateString()}</span>
-                </div>
-                <div className="flex gap-1">
-                  <span>VENUE:</span>
-                  <span className="border-b border-black flex-1 font-normal pl-2">Davao HQ, Bajada</span>
-                </div>
-              </div>
-
-              <p className="text-[9px] italic mb-3 font-semibold">Instructions: Please fill-out this form legibly from Section I-A to Section I-C.</p>
-
-              {/* I-A: PERSONAL DATA */}
-              <div className="mb-4">
-                <h3 className="font-bold text-[10px] uppercase bg-black text-white px-2 py-0.5 mb-1">I-A: PERSONAL DATA</h3>
-                <table className="w-full border-collapse snbc-table text-[9px]">
-                  <tbody>
-                    <tr>
-                      <td className="w-1/3"><strong>Last Name:</strong> <span className="font-bold text-slate-850 pl-1">{(activeDhqDonor.name || '').split(' ').pop()}</span></td>
-                      <td className="w-1/3"><strong>Age:</strong> <span className="font-mono pl-1">{Math.floor((new Date() - new Date(activeDhqDonor.dob || '1998-05-12')) / (1000 * 60 * 60 * 24 * 365.25)) || 25}</span></td>
-                      <td className="w-1/3"><strong>Sex:</strong> <span className="pl-1">{activeDhqDonor.sex || 'Female'}</span></td>
-                    </tr>
-                    <tr>
-                      <td><strong>First Name:</strong> <span className="font-bold text-slate-850 pl-1">{(activeDhqDonor.name || '').split(' ')[0]}</span></td>
-                      <td><strong>Date of Birth (mm/dd/yy):</strong> <span className="font-mono pl-1">{activeDhqDonor.dob || '—'}</span></td>
-                      <td><strong>Civil Status:</strong> <span className="pl-1">{activeDhqDonor.civilStatus || 'Single'}</span></td>
-                    </tr>
-                    <tr>
-                      <td><strong>Middle Name:</strong> <span className="pl-1">{(activeDhqDonor.name || '').split(' ').slice(1, -1).join(' ') || '—'}</span></td>
-                      <td colSpan={2}>
-                        <strong>Preferred Mailing Address:</strong><br />
-                        <span className="inline-block mr-3">[_] Home Address</span> <span>[_] Office Address</span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td colSpan={3}>
-                        <strong>Address:</strong> <span className="pl-1">{activeDhqDonor.address || 'Davao City'}</span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td><strong>Contact Numbers:</strong> <span className="font-mono pl-1">{activeDhqDonor.phone}</span></td>
-                      <td colSpan={2}><strong>E-mail address:</strong> <span className="font-mono pl-1">{activeDhqDonor.email || '—'}</span></td>
-                    </tr>
-                    <tr>
-                      <td><strong>Occupation:</strong> <span className="pl-1">Professional</span></td>
-                      <td><strong>Nationality:</strong> <span className="pl-1">Filipino</span></td>
-                      <td><strong>Religion:</strong> <span className="pl-1">Christian</span></td>
-                    </tr>
-                    <tr>
-                      <td colSpan={3} className="bg-slate-50">
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <strong>Type of Donor:</strong><br />
-                            <span className="mr-3">New to SNBC-M: [_{activeDhqDonor.status === 'New' ? '✓' : ' '}_] YES  [_{activeDhqDonor.status !== 'New' ? '✓' : ' '}_] NO</span>
-                            <span>First time: [_{activeDhqDonor.totalDonations <= 1 ? '✓' : ' '}_] YES  [_{activeDhqDonor.totalDonations > 1 ? '✓' : ' '}_] NO</span><br />
-                            <span className="mr-3">Repeat/Retained: [_{activeDhqDonor.totalDonations > 1 ? '✓' : ' '}_] YES  [_{activeDhqDonor.totalDonations <= 1 ? '✓' : ' '}_] NO</span>
-                            <span>Lapsed: [_{activeDhqDonor.status === 'Lapsed' ? '✓' : ' '}_] YES  [_{activeDhqDonor.status !== 'Lapsed' ? '✓' : ' '}_] NO</span>
-                          </div>
-                          <div className="border-l border-slate-350 pl-2">
-                            <strong>No. of times donated:</strong> <span className="font-bold pl-1">{activeDhqDonor.totalDonations || 1}</span><br />
-                            <strong>Date of last donation:</strong> <span className="font-mono pl-1">{activeDhqDonor.lastDonation || '—'}</span><br />
-                            <strong>Venue of last donation:</strong> <span className="pl-1">Davao HQ, Bajada</span>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              {/* I-B: DONOR HISTORY TITLE */}
-              <div>
-                <h3 className="font-bold text-[10px] uppercase bg-black text-white px-2 py-0.5 mb-1">I-B: DONOR HISTORY</h3>
-                <p className="text-[8px] leading-tight mb-2">
-                  Instructions: THESE QUESTIONS MUST BE ANSWERED CAREFULLY. They protect you and any patients receiving your blood.
-                  A "YES" answer may not necessarily exclude you from blood donation. All donors MUST read the donor educational materials provided by the staff before answering.
-                </p>
-
-                <table className="w-full border-collapse snbc-table text-[8.5px]">
-                  <thead>
-                    <tr className="bg-slate-100">
-                      <th className="text-left font-bold w-[82%]">Are you</th>
-                      <th className="text-center font-bold w-[9%]">YES</th>
-                      <th className="text-center font-bold w-[9%]">NO</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      { id: 1, q: 'Feeling healthy and well today and not experiencing any signs and symptoms of COVID-19 infection such as colds, cough, fever, sore throat, generalized weakness, and diarrhea?', val: (activeDhqDonor.health || DEFAULT_HEALTH)[0] },
-                      { id: 2, q: 'Currently taking medication? Have you taken any medications from the Deferral list?', val: !(activeDhqDonor.health || DEFAULT_HEALTH)[3] },
-                      { id: 3, q: 'Have you received any vaccination?', val: false },
-                      { id: 0, label: 'In the past three days' },
-                      { id: 4, q: 'Have you taken aspirin or anything that has aspirin in it?', val: false },
-                      { id: 0, label: 'QUESTION No. 5 FOR FEMALE DONORS: In the past 1 and 1/2 months (6weeks)' },
-                      { id: 5, q: 'Have you been pregnant or are you pregnant now? Last menstrual period: ______________', val: false },
-                      { id: 0, label: 'In the past 3 months, have you' },
-                      { id: 6, q: 'Donated blood, platelets or plasma?', val: !(activeDhqDonor.health || DEFAULT_HEALTH)[4] },
-                      { id: 0, label: 'In the past 12 months, have you' },
-                      { id: 7, q: 'Had a blood transfusion?', val: !(activeDhqDonor.health || DEFAULT_HEALTH)[2] },
-                      { id: 8, q: 'Had surgical operation? Dental operation?', val: !(activeDhqDonor.health || DEFAULT_HEALTH)[2] },
-                      { id: 9, q: 'Had a tattoo, ear or body piercing, accidental contact with blood, needle-stick injury and acupuncture?', val: !(activeDhqDonor.health || DEFAULT_HEALTH)[2] },
-                      { id: 10, q: 'Had sexual contact with high-risk individuals?', val: false },
-                      { id: 11, q: 'Had sexual contact with anyone in exchange material or monetary gain?', val: false },
-                      { id: 12, q: 'Had sexual contact with a person who has worked abroad?', val: false },
-                      { id: 13, q: 'Engaged in casual sex?', val: false },
-                    ].map((row, idx) => {
-                      if (row.label) {
+                {donorDonations.length === 0
+                  ? (
+                    <div className="text-center py-10 text-slate-400">
+                      <History className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                      <p className="text-xs font-semibold">No donation records yet.</p>
+                      <p className="text-[10px] mt-1">Lab results must be recorded first to create a donation record.</p>
+                    </div>
+                  )
+                  : (
+                    <div className="space-y-3">
+                      {donorDonations.map((d, i) => {
+                        const dId = String(d.donationId ?? d.donation_id ?? '');
+                        const eventId = d.eventId ?? d.event_id;
+                        const event = eventId ? (donationEvents || []).find(ev => String(ev.eventId ?? ev.event_id) === String(eventId)) : null;
+                        const dNumId = parseInt(String(d.donationId ?? d.donation_id ?? '').replace(/^DON-0*/i, ''), 10);
+                        const lab = donorLabsWithLocal.find(l => parseInt(String(l.donationId ?? l.donation_id ?? ''), 10) === dNumId);
+                        const outcome = d.screeningOutcome;
+                        const outcomeColor = outcome === 'Accepted'
+                          ? 'bg-green-50 border-green-200 text-green-700'
+                          : outcome === 'Temporarily Deferred' || outcome === 'Permanently Deferred'
+                          ? 'bg-red-50 border-red-200 text-red-700'
+                          : 'bg-amber-50 border-amber-200 text-amber-700';
+                        const isExpanded = expandedDonations.has(dNumId);
+                        const toggleExpand = () => setExpandedDonations(prev => {
+                          const next = new Set(prev);
+                          if (next.has(dNumId)) next.delete(dNumId); else next.add(dNumId);
+                          return next;
+                        });
                         return (
-                          <tr key={`label-${idx}`} className="bg-slate-50 font-bold">
-                            <td colSpan={3} className="text-left py-0.5">{row.label}</td>
-                          </tr>
+                          <div key={dId} className="border border-slate-200 rounded-xl overflow-hidden">
+                            {/* Clickable accordion header */}
+                            <button
+                              type="button"
+                              onClick={toggleExpand}
+                              className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors border-b border-slate-100 text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                                <span className="font-mono text-[10px] font-bold text-slate-500">{dId || `DON-${String(i+1).padStart(3,'0')}`}</span>
+                                <span className="text-slate-300">|</span>
+                                <span className="text-[10px] text-slate-600 font-semibold">{d.donationDate ?? d.donation_date ?? 'Unknown date'}</span>
+                                {eventId && <span className="text-[9px] text-slate-400">&middot; {event?.barangayOrganization ?? eventId}</span>}
+                              </div>
+                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${outcomeColor}`}>
+                                {outcome || 'Pending Outcome'}
+                              </span>
+                            </button>
+
+                            {/* Collapsible lab results */}
+                            {isExpanded && (
+                              lab
+                                ? (
+                                  <div className="px-4 py-3 grid grid-cols-4 gap-3 text-[10px] bg-white animate-in">
+                                    {[
+                                      { label: 'Hemoglobin', value: lab.hemoglobinResult ?? lab.hemoglobin_result },
+                                      { label: 'Blood Type', value: lab.bloodTypeConfirmed ?? lab.blood_type_confirmed },
+                                      { label: 'HBsAg', value: lab.hbsagResult ?? lab.hbsag_result },
+                                      { label: 'Syphilis', value: lab.syphilisResult ?? lab.syphilis_result },
+                                      { label: 'HIV', value: lab.hivResult ?? lab.hiv_result },
+                                      { label: 'HCV', value: lab.hcvResult ?? lab.hcv_result },
+                                      { label: 'Malaria', value: lab.malariaResult ?? lab.malaria_result },
+                                      { label: 'NAT', value: lab.natResult ?? lab.nat_result },
+                                    ].map(({ label, value }) => (
+                                      <div key={label}>
+                                        <span className="block text-slate-400 uppercase tracking-wider mb-0.5">{label}</span>
+                                        <span className={`font-semibold ${value === 'Reactive' ? 'text-red-600' : 'text-slate-700'}`}>{value || '-'}</span>
+                                      </div>
+                                    ))}
+                                    {(lab.othersResult ?? lab.others_result) && (
+                                      <div className="col-span-4 border-t border-slate-100 pt-2 mt-1">
+                                        <span className="block text-slate-400 uppercase tracking-wider mb-0.5">Others / Remarks</span>
+                                        <span className="font-semibold text-slate-700">{lab.othersResult ?? lab.others_result}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                                : (
+                                  <div className="px-4 py-3 text-[10px] text-amber-600 font-semibold bg-amber-50">
+                                    No lab results recorded for this donation.
+                                  </div>
+                                )
+                            )}
+                          </div>
                         );
-                      }
-                      return (
-                        <tr key={`q-${row.id}`} className="hover:bg-slate-50">
-                          <td className="text-left font-normal">{row.id}. {row.q}</td>
-                          <td className="text-center font-bold font-mono"></td>
-                          <td className="text-center font-bold font-mono"></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Page 1 Footer */}
-            <div className="flex justify-between items-center border-t border-black pt-1 text-[8px] font-mono mt-2">
-              <span>DOH-DCHD-RD-SNBC-DMS-FORM002</span>
-              <span>EFFECTIVITY DATE: JULY 3, 2023</span>
-              <span>REVISION: 0</span>
-              <span className="font-bold">Page | 1 of 3</span>
-            </div>
-          </div>
-
-          {/* ── PAGE 2: Section I-B (Q14-29) & Section I-C & Section I-D ── */}
-          <div className="print-page flex flex-col justify-between">
-            <div>
-              <table className="w-full border-collapse snbc-table text-[8.5px]">
-                <thead>
-                  <tr className="bg-slate-100">
-                    <th className="text-left font-bold w-[82%]">Are you (continued)</th>
-                    <th className="text-center font-bold w-[9%]">YES</th>
-                    <th className="text-center font-bold w-[9%]">NO</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { id: 14, q: 'Lived with a person who has hepatitis?', val: false },
-                    { id: 15, q: 'Have you been imprisoned?', val: false },
-                    { id: 16, q: 'Have any of your relatives had Creutzfeldt – Jacob (Mad Cow) disease?', val: false },
-                    { id: 0, label: 'Have you ever' },
-                    { id: 17, q: 'Travel outside your place of residence for the past year?', val: false },
-                    { id: 18, q: 'Travel outside the Philippines?', val: false },
-                    { id: 19, q: 'Used needles to take drugs, steroids or anything not prescribed by your doctor?', val: false },
-                    { id: 20, q: 'Used clotting factor concentrates?', val: false },
-                    { id: 21, q: 'Had a positive test for HIV or Syphilis?', val: false },
-                    { id: 22, q: 'Had hepatitis?', val: false },
-                    { id: 23, q: 'Had malaria?', val: false },
-                    { id: 24, q: 'Been told to have or treated for genital wart, syphilis, gonorrhea, or other Sexually Transmissible Infections?', val: false },
-                    { id: 25, q: 'Had any type of cancer? For example, leukemia?', val: false },
-                    { id: 26, q: 'Had any problems with your heart or lungs?', val: false },
-                    { id: 27, q: 'Had a bleeding condition or a blood disease?', val: false },
-                    { id: 28, q: 'Are you giving blood because you want to be tested for HIV or Hepatitis virus?', val: false },
-                    { id: 29, q: 'Are you aware that if you have HIV or Hepatitis, you can give it to someone else though you may feel well and have a negative HIV/Hepatitis test?', val: true },
-                  ].map((row, idx) => {
-                    if (row.label) {
-                      return (
-                        <tr key={`label2-${idx}`} className="bg-slate-50 font-bold">
-                          <td colSpan={3} className="text-left py-0.5">{row.label}</td>
-                        </tr>
-                      );
-                    }
-                    return (
-                      <tr key={`q-${row.id}`} className="hover:bg-slate-50">
-                        <td className="text-left font-normal">{row.id}. {row.q}</td>
-                        <td className="text-center font-bold font-mono"></td>
-                        <td className="text-center font-bold font-mono"></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              {/* I-C: DONOR'S INFORMED CONSENT */}
-              <div className="mt-3">
-                <h3 className="font-bold text-[9px] uppercase bg-black text-white px-2 py-0.5 mb-1">I-C: DONOR'S INFORMED CONSENT</h3>
-                <ul className="list-disc pl-4 text-[7.5px] leading-tight space-y-1 text-slate-700">
-                  <li>I am the person referred to in all entries, which were read and well understood by me. It is my free and voluntary act to donate my blood, aware of its risks during and after extraction. The same has been explained to me in the understandable language and dialect that I speak.</li>
-                  <li>I am voluntarily giving my blood through <strong>Sub-National Blood Center – Mindanao</strong> and I understand that my blood will be tested for Blood Type, Hemoglobin, Malaria, Syphilis, Hepatitis B, Hepatitis C, and HIV and no official result will be issued to me. If found reactive, I agreed to be referred to the appropriate facility for counselling and for further management.</li>
-                  <li>I am allowing the <strong>Sub-National Blood Center – Mindanao</strong> and responsible authorities to access my data in accordance with the RA No. 10173 or the Data Privacy Act of 2012.</li>
-                  <li>All materials and data might be used for different medical research purposes.</li>
-                  <li>I certify that I have to the best of my knowledge, truthfully answered the above questions.</li>
-                </ul>
-
-                <div className="mt-3 flex justify-end">
-                  <div className="text-center w-64 border-t border-black pt-1">
-                    <span className="font-bold text-[8px] uppercase">DONOR’S SIGNATURE OVER PRINTED NAME & DATE</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 text-[8px] font-bold mt-2">
-                  <div>Contact Person (other relative/s): ___________________________</div>
-                  <div>Address: ______________________________________________</div>
-                  <div className="col-span-2">Contact Number: ________________________________________</div>
-                </div>
+                      })}
+                    </div>
+                  )
+                }
               </div>
 
-              {/* FOR BLOOD DONOR SCREENING OFFICER USE ONLY */}
-              <div className="mt-3 border-2 border-black p-2 bg-slate-50/50">
-                <h3 className="font-black text-[10px] text-center uppercase tracking-wide border-b border-black pb-1 mb-2">FOR BLOOD DONOR SCREENING OFFICER USE ONLY</h3>
-
-                <h4 className="font-bold text-[9px] uppercase mb-1">I-D: PHYSICAL EXAMINATION</h4>
-                <table className="w-full border-collapse snbc-table text-[8.5px] mb-2 bg-white">
-                  <tbody>
-                    <tr>
-                      <td><strong>Body weight:</strong> ________ kg</td>
-                      <td><strong>Blood Pressure:</strong> ________ mmHg</td>
-                      <td><strong>Pulse rate:</strong> ________ bpm</td>
-                      <td><strong>Temp:</strong> ________ °C</td>
-                    </tr>
-                    <tr>
-                      <td colSpan={2}><strong>General Appearance:</strong> ________________________</td>
-                      <td colSpan={2}><strong>Skin:</strong> ________________________</td>
-                    </tr>
-                    <tr>
-                      <td colSpan={2}><strong>HEENT:</strong> ________________________</td>
-                      <td colSpan={2}><strong>Heart and Lungs:</strong> ________________________</td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                <h4 className="font-bold text-[9px] uppercase mb-1">REMARKS</h4>
-                <div className="grid grid-cols-2 gap-2 text-[8px] font-bold border border-black p-2 mb-2 bg-white">
-                  <div>[   ] Accepted</div>
-                  <div>[   ] Permanently Deferred</div>
-                  <div>[   ] Temporarily Deferred</div>
-                  <div>[   ] Indefinite Deferral.</div>
-                  <div className="col-span-2 border-t border-dashed border-slate-300 pt-1 mt-1">REASON/S: __________________________________________________________________</div>
-                </div>
-
-                <div className="flex justify-end mt-2">
-                  <div className="text-center w-52 border-t border-black pt-1">
-                    <span className="font-bold text-[8px]">Blood Donor Screening Officer Signature</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Page 2 Footer */}
-            <div className="flex justify-between items-center border-t border-black pt-1 text-[8px] font-mono mt-2">
-              <span>DOH-DCHD-RD-SNBC-DMS-FORM002</span>
-              <span>EFFECTIVITY DATE: JULY 3, 2023</span>
-              <span>REVISION: 0</span>
-              <span className="font-bold">Page | 2 of 3</span>
-            </div>
-          </div>
-
-          {/* ── PAGE 3: Section II & Section I-E & Section I-F ── */}
-          <div className="print-page flex flex-col justify-between">
-            <div>
-              <h3 className="font-bold text-[10px] uppercase bg-black text-white px-2 py-0.5 mb-1">II. FOR TECHNICAL MANAGEMENT USE ONLY</h3>
-
-              {/* Place Barcode Labels Row */}
-              <div className="grid grid-cols-3 gap-2 mb-3 mt-1">
-                <div className="border border-black border-dashed p-4 text-[8px] text-center font-bold uppercase min-h-[50px] flex items-center justify-center">
-                  Place Barcode Label Here
-                </div>
-                <div className="border border-black border-dashed p-4 text-[8px] text-center font-bold uppercase min-h-[50px] flex items-center justify-center">
-                  Place Barcode Label Here
-                </div>
-                <div className="border border-black border-dashed p-4 text-[8px] text-center font-bold uppercase min-h-[50px] flex items-center justify-center">
-                  Place Barcode Label Here
-                </div>
-              </div>
-
-              {/* Columns Grid for Technical Forms */}
-              <div className="grid grid-cols-12 gap-3 mb-4">
-                {/* Left block (5/12 cols) */}
-                <div className="col-span-5 space-y-3">
-                  <div className="border border-black p-2">
-                    <h4 className="font-extrabold text-[8px] uppercase border-b border-black pb-0.5 mb-1.5">FOR PHLEBOTOMIST USE ONLY</h4>
-                    <p className="text-[8px] mb-1">Blood bag: ( S) Single &nbsp;&nbsp; ( D ) Double &nbsp;&nbsp; (T) Triple</p>
-                    <p className="text-[8px] mb-1">Segment Number: ___________________</p>
-                    <p className="text-[8px] mb-1">Time Started: _______________________</p>
-                    <p className="text-[8px] mb-1">Time Ended: ________________________</p>
-                    <p className="text-[8px] mb-2">Phlebotomist: ______________________</p>
-
-                    <table className="w-full border-collapse snbc-table text-[8px] bg-white">
-                      <thead>
-                        <tr className="bg-slate-50">
-                          <th className="font-bold text-left">TEST</th>
-                          <th className="font-bold text-center">RESULT</th>
-                          <th className="font-bold text-center">SCREENED BY</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td>Hemoglobin</td>
-                          <td></td>
-                          <td></td>
-                        </tr>
-                        <tr>
-                          <td>Blood Type</td>
-                          <td></td>
-                          <td></td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Right block (7/12 cols) */}
-                <div className="col-span-7 space-y-3">
-                  <div className="border border-black p-2">
-                    <h4 className="font-extrabold text-[8px] uppercase border-b border-black pb-0.5 mb-1.5">IMMUNOHEMATOLOGY</h4>
-                    <table className="w-full border-collapse snbc-table text-[8px] bg-white">
-                      <thead>
-                        <tr className="bg-slate-50">
-                          <th className="font-bold text-left">TEST</th>
-                          <th className="font-bold text-center">RESULT</th>
-                          <th className="font-bold text-center">SCREENED BY</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td>Blood Type</td>
-                          <td className="text-center font-bold"></td>
-                          <td className="text-center"></td>
-                        </tr>
-                        <tr>
-                          <td>Rh Typing</td>
-                          <td className="text-center font-bold"></td>
-                          <td className="text-center"></td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="border border-black p-2">
-                    <h4 className="font-extrabold text-[8px] uppercase border-b border-black pb-0.5 mb-1.5">SEROLOGY & NAT</h4>
-                    <table className="w-full border-collapse snbc-table text-[7.5px] bg-white">
-                      <thead>
-                        <tr className="bg-slate-50">
-                          <th className="font-bold text-left">TEST</th>
-                          <th className="font-bold text-center">RESULT</th>
-                          <th className="font-bold text-center">SCREENED BY</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {['HBsAg', 'Syphilis', 'HIV', 'HCV', 'Malaria', 'NAT', 'Others:'].map(t => (
-                          <tr key={t}>
-                            <td>{t}</td>
-                            <td></td>
-                            <td></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-
-              {/* Section I-E: POST-DONATION PHLEBOTOMY CARE */}
-              <div className="mb-3 border-t border-black pt-2">
-                <h3 className="font-bold text-[9px] uppercase mb-1">I-E: POST-DONATION PHLEBOTOMY CARE</h3>
-                <p className="font-bold text-[8px] mb-1">Date of Next Donation: ____________________________</p>
-                <ul className="grid grid-cols-2 gap-x-4 gap-y-0.5 list-disc pl-4 text-[7px] text-slate-700 leading-tight">
-                  <li>Rest and remain in the area for 15 minutes.</li>
-                  <li>Increase fluid intake for the next few hours may be up to 24 hours.</li>
-                  <li>Have something to eat and drink, or both, before leaving the donor area.</li>
-                  <li>Do not drink alcoholic beverages within 24 hours.</li>
-                  <li>Do not smoke for the next 3 hours.</li>
-                  <li>Leave the bandage on for a few hours.</li>
-                  <li>Do not put strong pressure on or try to lift or carry heavy objects with the donating arm for the next few hours.</li>
-                  <li>If bleeding occurs from the phlebotomy site, reapply direct pressure until it stops.</li>
-                  <li>If you feel dizzy or faint, sit down with your head lowered between your knees or lie down with your feet elevated.</li>
-                  <li>If the symptoms continue, return to the blood bank or see your doctor.</li>
-                  <li>Refrain from very strenuous activity or hazardous work for a few hours.</li>
-                </ul>
-              </div>
-
-              {/* Section I-F: CONFIDENTIAL UNIT EXCLUSION (CUE) */}
-              <div className="border border-black p-2 bg-slate-50/50 mt-3">
-                <h3 className="font-black text-[9px] uppercase border-b border-black pb-0.5 mb-1.5">I-F: CONFIDENTIAL UNIT EXCLUSION (CUE)</h3>
-                <p className="text-[7.5px] leading-tight mb-3">
-                  If at any point during or after your donation, your blood is not suitable for transfusion, please inform the
-                  Sub-National Blood Center - Mindanao Staff. Please use your Blood Donation ID Number and the Segment Number written below in identifying your blood donation.<br />
-                  <strong>Contact Number of Sub-National Blood Center-Mindanao: Cellphone No. 09625998457</strong>
+              {/* Footer note */}
+              <div className="px-6 py-3 border-t border-slate-100 flex-shrink-0 bg-blue-50">
+                <p className="text-[10px] text-blue-600 font-semibold">
+                  Returning donor? Go to <strong>Encode Lab Results</strong> and search for this donor to start a new donation session. No re-registration needed.
                 </p>
-
-                <div className="flex justify-between items-end">
-                  <div className="space-y-1.5 text-[8px] font-bold">
-                    <div>Segment Number: ________________________</div>
-                    <div>Date of Donation: _________________________</div>
-                    <div>Place of Donation: ________________________</div>
-                  </div>
-                  <div className="border border-black border-dashed px-5 py-3 text-[8px] font-bold text-center uppercase bg-white">
-                    Place Barcode Label Here
-                  </div>
-                </div>
               </div>
-            </div>
-
-            {/* Page 3 Footer */}
-            <div className="flex justify-between items-center border-t border-black pt-1 text-[8px] font-mono mt-2">
-              <span>DOH-DCHD-RD-SNBC-DMS-FORM002</span>
-              <span>EFFECTIVITY DATE: JULY 3, 2023</span>
-              <span>REVISION: 0</span>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
-      {/* ── ACTIVE DHQ VIEWER MODAL ── */}
-      {activeDhqDonor && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm print:hidden">
-          <div className="bg-white rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col modal-in">
-            {/* Modal Header */}
-            <div className="bg-slate-900 px-6 py-4 flex items-center justify-between flex-shrink-0">
-              <div>
-                <h3 className="text-white font-bold text-sm">Donor Health History (DHQ Part 1)</h3>
-                <p className="text-slate-400 text-[10px] mt-0.5">Pre-screening health affirmations check for {activeDhqDonor.name}</p>
-              </div>
-              <button
-                onClick={() => setActiveDhqDonor(null)}
-                className="text-slate-450 hover:text-white transition-colors cursor-pointer hover:bg-slate-850 p-1.5 rounded-lg"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
 
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto space-y-5 flex-1">
-              {/* Demographics Card */}
-              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-2 text-xs">
-                <div className="flex justify-between border-b border-slate-100 pb-1.5"><span className="text-slate-400">Donor Name</span><span className="font-bold text-slate-900">{activeDhqDonor.name}</span></div>
-                <div className="flex justify-between border-b border-slate-100 pb-1.5"><span className="text-slate-400">Gender / Age</span><span className="font-bold text-slate-900">{activeDhqDonor.sex || '—'} / {activeDhqDonor.dob || '—'}</span></div>
-                <div className="flex justify-between border-b border-slate-100 pb-1.5"><span className="text-slate-400">Mobile Phone</span><span className="font-bold text-slate-900">{activeDhqDonor.phone}</span></div>
-                <div className="flex justify-between"><span className="text-slate-400">Davao Address</span><span className="font-bold text-slate-900">{activeDhqDonor.address || 'Davao City'}</span></div>
-              </div>
+      {/*  -  -  - Ã‚Â -  -  -  - Ã‚Â -  NOTICE / VALIDATION MODAL  -  -  - Ã‚Â -  -  -  - Ã‚Â -  */}
+      <ConfirmationModal
+        isOpen={noticeModal.isOpen}
+        title={noticeModal.title}
+        message={noticeModal.message}
+        confirmText="Got It"
+        cancelText=""
+        variant={noticeModal.variant}
+        onConfirm={() => setNoticeModal({ isOpen: false, title: '', message: '', variant: 'warning' })}
+        onCancel={() => setNoticeModal({ isOpen: false, title: '', message: '', variant: 'warning' })}
+      />
 
-              {/* Health Checklist Affirmations */}
-              <div>
-                <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2.5">Affirmed Health Statements</h4>
-                <div className="space-y-2.5">
-                  {[
-                    'Donor is in good health and feeling well today.',
-                    'Donor weighs at least 50 kg.',
-                    'Donor has not had major illness, surgery, or tattoo in the last 12 months.',
-                    'Donor is not currently taking antibiotics or prescription medication.',
-                    'Donor has not donated whole blood in the last 3 months.',
-                  ].map((q, i) => {
-                    const healthArr = activeDhqDonor.health || DEFAULT_HEALTH;
-                    const passed = healthArr[i];
-                    return (
-                      <div key={i} className="flex items-start justify-between gap-4 p-3 border border-slate-100 rounded-lg bg-white shadow-xs">
-                        <span className="text-xs text-slate-700 font-semibold leading-relaxed">{q}</span>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${passed
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                          : 'bg-rose-50 text-[#C21C24] border border-rose-100'
-                          }`}>
-                          {passed ? 'Passed' : 'Declined'}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
 
-            {/* Modal Footer */}
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between flex-shrink-0">
-              <button
-                onClick={() => setActiveDhqDonor(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-              >
-                Close View
-              </button>
-              <button
-                onClick={handlePrintDhq}
-                className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-              >
-                <Printer className="w-3.5 h-3.5" /> Print Pre-filled DHQ
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── ENCODE LAB RESULT MODAL (Table 8) ── */}
+      {/* â”€â”€ ENCODE LAB RESULT MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {showLabResultModal && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => { setShowLabResultModal(false); setLabSaved(false); }}>
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg modal-in" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col">
 
-            {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-red-50 to-white rounded-t-2xl">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Registry Staff Module · Table 8: Lab Results</p>
-              <h4 className="font-bold text-slate-900 text-sm tracking-tight">Encode Laboratory Serology Test Results</h4>
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center">
+                  <Droplets className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Encode Lab Result</h3>
+                  <p className="text-[10px] text-slate-400 font-semibold">Section II â€“ Table 8 Serology & Blood Typing</p>
+                </div>
+              </div>
+              <button onClick={() => { setShowLabResultModal(false); setLabSaved(false); }} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-              {labSaved && (
-                <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-2.5 rounded-lg text-xs font-bold text-center">
-                  Laboratory results encoded successfully! Confirmed blood type has been updated.
-                </div>
-              )}
+            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
 
-              {/* Donation ID Select list */}
+              {/* Step 1 â€“ Donor & Donation Info */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                  Select Donation Record <span className="text-rose-500">*</span>
-                </label>
-                <div className="mb-2">
-                  <input
-                    type="text"
-                    placeholder="Search by Donation ID or Donor ID..."
-                    value={labDonationSearchQuery}
-                    onChange={e => setLabDonationSearchQuery(e.target.value)}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:ring-1 focus:ring-[#C21C24] outline-none"
-                  />
-                </div>
-                <select
-                  value={labForm.donationId}
-                  onChange={e => setLabForm({ ...labForm, donationId: e.target.value })}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-[#C21C24] outline-none bg-white"
-                >
-                  <option value="">-- Select Donation Record --</option>
-                  {(donations || [])
-                    .filter(d => {
-                      const q = labDonationSearchQuery.toLowerCase();
-                      // Only show donations that do not yet have a lab result recorded (or allow changing them)
-                      const alreadyHasResult = (labTestResults || []).some(r => r.donationId === d.donationId);
-                      const matchesQuery = d.donationId.toLowerCase().includes(q) || d.donorId.toLowerCase().includes(q);
-                      return matchesQuery && !alreadyHasResult;
-                    })
-                    .map(d => (
-                      <option key={d.donationId} value={d.donationId}>
-                        Donation {d.donationId} (Donor: {d.donorId}) - {d.donationDate}
-                      </option>
-                    ))
-                  }
-                </select>
-              </div>
-
-              {/* Confirmed Blood Type & Hemoglobin */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Confirmed Blood Type <span className="text-rose-500">*</span></label>
-                  <select
-                    value={labForm.bloodTypeConfirmed}
-                    onChange={e => setLabForm({ ...labForm, bloodTypeConfirmed: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-[#C21C24] outline-none bg-white"
-                  >
-                    {['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'].map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Hemoglobin Result (g/dL)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="25"
-                    value={labForm.hemoglobinResult}
-                    onChange={e => setLabForm({ ...labForm, hemoglobinResult: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-[#C21C24] outline-none bg-white"
-                  />
-                </div>
-              </div>
-
-              {/* TTI tests Grid */}
-              <div className="bg-slate-50 p-4 border border-slate-200 rounded-xl space-y-3">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">TTI Serology Screener Results</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Step 1 â€” Donor & Donation Info</p>
                 <div className="grid grid-cols-2 gap-3">
+                  {/* Donor search */}
+                  <div className="col-span-2">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Search Donor</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Type donor name or IDâ€¦"
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                        value={labDonationSearchQuery}
+                        onChange={e => setLabDonationSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    {labDonationSearchQuery.length > 0 && (() => {
+                        // Only hide donors who are already finalized FOR THE SELECTED EVENT.
+                        // If no event is chosen yet, show everyone â€” they can donate in new events.
+                        const finalizedDonorIds = new Set();
+                        if (labForm.eventId) {
+                          (donations || []).forEach(d => {
+                            const outcome = d.screeningOutcome ?? d.screening_outcome ?? '';
+                            const finalized = outcome === 'Accepted' || outcome === 'Temporarily Deferred' || outcome === 'Permanently Deferred';
+                            if (!finalized) return;
+                            const dEvId = String(d.eventId ?? d.event_id ?? '');
+                            if (dEvId === String(labForm.eventId)) {
+                              finalizedDonorIds.add(parseInt(String(d.donorId ?? d.donor_id ?? ''), 10));
+                            }
+                          });
+                        }
+                        const matches = preparedDonors.filter(d => {
+                          if (labForm.eventId) {
+                            const numId = parseInt(String(d.id ?? '').replace(/^D0*/i, ''), 10);
+                            if (finalizedDonorIds.has(numId)) return false;
+                          }
+                          return (
+                            d.name.toLowerCase().includes(labDonationSearchQuery.toLowerCase()) ||
+                            d.id.toLowerCase().includes(labDonationSearchQuery.toLowerCase())
+                          );
+                        });
+                        return (
+                          <div className="mt-1 border border-slate-200 rounded-lg shadow-md max-h-40 overflow-y-auto bg-white z-10 relative">
+                            {matches.slice(0, 8).map(d => (
+                              <button
+                                key={d.id}
+                                type="button"
+                                className="w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 transition-colors flex items-center justify-between cursor-pointer"
+                                onClick={() => {
+                                  setLabForm(prev => ({ ...prev, donorId: d.id, donorName: d.name }));
+                                  setLabDonationSearchQuery('');
+                                }}
+                              >
+                                <span className="font-semibold text-slate-800">{d.name}</span>
+                                <span className="text-slate-400 font-mono">{d.id} Â· {d.bloodType}</span>
+                              </button>
+                            ))}
+                            {matches.length === 0 && (
+                              <p className="px-3 py-2 text-xs text-slate-400">
+                                {labForm.eventId ? 'All matching donors are already finalized for this event.' : 'No donors found.'}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    {labForm.donorId && (
+                      <div className="mt-1.5 flex items-center gap-2 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-lg">
+                        <CheckCircle className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />
+                        <span className="text-[11px] font-bold text-indigo-700">{labForm.donorName} <span className="font-mono font-normal">({labForm.donorId})</span></span>
+                        <button type="button" className="ml-auto text-indigo-400 hover:text-indigo-700 cursor-pointer" onClick={() => setLabForm(prev => ({ ...prev, donorId: '', donorName: '' }))}>
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Event ID â€“ required dropdown */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                      Donation Event <span className="text-rose-400">*</span>
+                    </label>
+                    <select
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-300 ${
+                        !labForm.eventId ? 'border-rose-200 text-slate-400' : 'border-slate-200 text-slate-700'
+                      }`}
+                      value={labForm.eventId}
+                      onChange={e => setLabForm(prev => ({ ...prev, eventId: e.target.value }))}
+                    >
+                      <option value="">— Select Event —</option>
+                      {(() => {
+                        // Build set of event IDs where the selected donor already has a finalized outcome
+                        const FINALIZED = new Set(['Accepted', 'Temporarily Deferred', 'Permanently Deferred', 'Indefinite Deferral']);
+                        const donorNumId = labForm.donorId
+                          ? parseInt(String(labForm.donorId).replace(/^D0*/i, ''), 10)
+                          : null;
+                        const blockedEventIds = new Set();
+                        if (donorNumId) {
+                          (donations || []).forEach(d => {
+                            const dDonorId = parseInt(String(d.donorId ?? d.donor_id ?? ''), 10);
+                            if (dDonorId !== donorNumId) return;
+                            const outcome = d.screeningOutcome ?? d.screening_outcome ?? '';
+                            if (!FINALIZED.has(outcome)) return;
+                            const evId = String(d.eventId ?? d.event_id ?? '').toUpperCase();
+                            if (evId) blockedEventIds.add(evId);
+                          });
+                        }
+                        return (donationEvents || []).filter(ev => {
+                          const evId = String(ev.eventId ?? ev.event_id ?? '').toUpperCase();
+                          return !blockedEventIds.has(evId);
+                        }).map(ev => (
+                          <option key={ev.eventId ?? ev.event_id} value={ev.eventId ?? ev.event_id}>
+                            {ev.eventId ?? ev.event_id} · {ev.barangayOrganization ?? ev.barangay_organization ?? ev.venue ?? 'Unknown venue'} ({ev.eventDate ?? ev.event_date ?? '-'})
+                          </option>
+                        ));
+                      })()}
+                    </select>
+                    {!labForm.eventId && (
+                      <p className="text-[9px] text-rose-400 mt-0.5 font-semibold">Required â€” select the event this blood was collected from.</p>
+                    )}
+                  </div>
+
+                  {/* Donation Date */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Donation Date</label>
+                    <input
+                      type="date"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      value={labForm.donationDate}
+                      onChange={e => setLabForm(prev => ({ ...prev, donationDate: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <hr className="border-slate-100" />
+
+              {/* Step 2 â€“ Lab Results */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Step 2 â€” Lab Results</p>
+                <div className="grid grid-cols-2 gap-3">
+
+                  {/* Blood Type Confirmed */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Blood Type (Confirmed)</label>
+                    <select
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      value={labForm.bloodTypeConfirmed}
+                      onChange={e => setLabForm(prev => ({ ...prev, bloodTypeConfirmed: e.target.value }))}
+                    >
+                      {['O+','O-','A+','A-','B+','B-','AB+','AB-'].map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Hemoglobin */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Hemoglobin (g/dL)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      value={labForm.hemoglobinResult}
+                      onChange={e => setLabForm(prev => ({ ...prev, hemoglobinResult: e.target.value }))}
+                    />
+                  </div>
+
+                  {/* TTI Tests */}
                   {[
-                    { key: 'hbsagResult', label: 'HBsAg (Hepatitis B)' },
-                    { key: 'syphilisResult', label: 'Syphilis (Treponema)' },
-                    { key: 'hivResult', label: 'HIV 1/2 + Antigen' },
-                    { key: 'hcvResult', label: 'HCV (Hepatitis C)' },
-                    { key: 'malariaResult', label: 'Malaria' },
-                    { key: 'natResult', label: 'NAT (Nucleic Acid Test)' }
-                  ].map(test => (
-                    <div key={test.key}>
-                      <label className="block text-[10px] font-bold text-slate-500 mb-1">{test.label}</label>
+                    { label: 'HBsAg', key: 'hbsagResult' },
+                    { label: 'Syphilis', key: 'syphilisResult' },
+                    { label: 'HIV', key: 'hivResult' },
+                    { label: 'HCV', key: 'hcvResult' },
+                    { label: 'Malaria', key: 'malariaResult' },
+                    { label: 'NAT', key: 'natResult' },
+                  ].map(({ label, key }) => (
+                    <div key={key}>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">{label}</label>
                       <select
-                        value={labForm[test.key]}
-                        onChange={e => setLabForm({ ...labForm, [test.key]: e.target.value })}
-                        className={`w-full border rounded-lg px-3 py-1.5 text-xs outline-none ${labForm[test.key] === 'Reactive'
-                          ? 'border-rose-200 bg-rose-50 text-rose-700 font-bold'
-                          : 'border-slate-200 bg-white'
-                          }`}
+                        className={`w-full border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300 ${
+                          labForm[key] === 'Reactive'
+                            ? 'border-rose-300 bg-rose-50 text-rose-700'
+                            : 'border-slate-200 text-emerald-700 bg-emerald-50'
+                        }`}
+                        value={labForm[key]}
+                        onChange={e => setLabForm(prev => ({ ...prev, [key]: e.target.value }))}
                       >
                         <option value="Non-Reactive">Non-Reactive</option>
                         <option value="Reactive">Reactive</option>
-                        <option value="NCU">NCU</option>
-                        <option value="NS">NS</option>
+                        <option value="Indeterminate">Indeterminate</option>
                       </select>
                     </div>
                   ))}
+
+                  {/* Others */}
+                  <div className="col-span-2">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Others / Remarks <span className="text-slate-300">(optional)</span></label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Hepatitis B Core Total â€“ Non-Reactive"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      value={labForm.othersResult}
+                      onChange={e => setLabForm(prev => ({ ...prev, othersResult: e.target.value }))}
+                    />
+                  </div>
                 </div>
               </div>
+            </div>
 
-              {/* Action Buttons */}
-              <div className="flex gap-2.5 text-xs font-semibold pt-2">
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-slate-100 flex-shrink-0 flex items-center justify-between gap-3">
+              {labSaved ? (
+                <div className="flex items-center gap-2 text-emerald-600">
+                  <CheckCircle className="w-4 h-4" />
+                  <span className="text-xs font-bold">Lab result saved successfully!</span>
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-400">All TTI tests default to Non-Reactive. Change to Reactive if applicable.</p>
+              )}
+              <div className="flex items-center gap-2 ml-auto">
                 <button
+                  type="button"
                   onClick={() => { setShowLabResultModal(false); setLabSaved(false); }}
-                  className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 text-slate-655 rounded-lg hover:bg-slate-100 transition cursor-pointer"
-                >Cancel</button>
+                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
                 <button
-                  onClick={() => {
-                    if (!labForm.donationId) return setNoticeModal({ isOpen: true, title: 'No Donation Selected', message: 'Please select a donation record first before encoding lab results.', variant: 'warning' });
-                    addLabTestResult(labForm);
+                  type="button"
+                  disabled={!labForm.donorId || !labForm.eventId}
+                  onClick={async () => {
+                    if (!labForm.donorId || !labForm.eventId) return;
+                    await addLabTestResult(labForm);
+                    await fetchLabResultsFromAPI();
+                    await fetchDonationsFromAPI(); // refresh so new donation appears in donor history
                     setLabSaved(true);
-                    setLabDonationSearchQuery('');
-                    setTimeout(() => {
-                      setLabSaved(false);
-                      setShowLabResultModal(false);
-                    }, 1200);
+                    setTimeout(() => { setShowLabResultModal(false); setLabSaved(false); }, 1500);
                   }}
-                  className="flex-1 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition shadow-sm cursor-pointer"
-                >Encode Result</button>
+                  className="px-4 py-2 text-xs font-bold bg-slate-900 hover:bg-slate-700 text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Save Lab Result
+                </button>
               </div>
             </div>
 
@@ -1763,9 +1668,10 @@ export default function RegistryDashboard() {
         </div>
       )}
 
-      {/* ── RIGHT SLIDE-IN DRAWER: REGISTER DONOR ── */}
+
+      {/* â”€â”€ RIGHT SLIDE-IN DRAWER: REGISTER DONOR â”€â”€ */}
       {/* Backdrop */}
-      {/* ── REGISTER DONOR MODAL POPUP ── */}
+      {/* â”€â”€ REGISTER DONOR MODAL POPUP â”€â”€ */}
       {showDrawer && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm print:hidden">
           <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col modal-in">
@@ -1774,7 +1680,7 @@ export default function RegistryDashboard() {
             <div className="bg-slate-900 px-6 py-5 flex items-center justify-between flex-shrink-0">
               <div>
                 <h3 className="text-white font-bold text-sm">Register New Donor</h3>
-                <p className="text-slate-400 text-[10px] mt-0.5">Table 5: Donors — Fill in the complete donor profile below</p>
+                <p className="text-slate-400 text-[10px] mt-0.5">Table 5: Donors â€” Fill in the complete donor profile below</p>
               </div>
               <button
                 onClick={() => setShowDrawer(false)}
@@ -1946,11 +1852,11 @@ export default function RegistryDashboard() {
         </div>
       )}
 
-      {/* ── DONOR REGISTRATION SUCCESS MODAL ── */}
+      {/* â”€â”€ DONOR REGISTRATION SUCCESS MODAL â”€â”€ */}
       <SuccessModal
         isOpen={registrationSuccess.isOpen}
         title="Donor Registered Successfully"
-        message="Profile saved to SNBC-M · Table 5: Donors"
+        message="Profile saved to SNBC-M Â· Table 5: Donors"
         confirmText="Go to Donor List"
         onClose={() => {
           setRegistrationSuccess({ isOpen: false, donorId: '', donorName: '' });
@@ -1959,12 +1865,12 @@ export default function RegistryDashboard() {
         details={[
           { label: "Donor Name", value: registrationSuccess.donorName },
           { label: "Donor ID", value: registrationSuccess.donorId },
-          { label: "Record Status", value: "Active · Pending Lab Conf." },
+          { label: "Record Status", value: "Active Â· Pending Lab Conf." },
           { label: "Registered On", value: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) }
         ]}
       />
 
-      {/* ── ONSITE SCREENING OUTCOMES MODAL ── */}
+      {/* â”€â”€ ONSITE SCREENING OUTCOMES MODAL â”€â”€ */}
       {editingMedicalDonor && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
@@ -1981,7 +1887,7 @@ export default function RegistryDashboard() {
                   ID: <span className="font-mono text-slate-500">{editingMedicalDonor.id}</span>
                 </p>
               </div>
-              <button onClick={() => { setEditingMedicalDonor(null); setEventSearchQuery(''); }} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors">
+              <button onClick={() => { setEditingMedicalDonor(null); setEventSearchQuery(''); }} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1989,118 +1895,40 @@ export default function RegistryDashboard() {
             {/* Scrollable form body */}
             <div className="overflow-y-auto flex-1 p-6 space-y-5">
 
-              {/* SEARCHABLE DONATION EVENTS LIST */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                    Link Mobile Blood Donation Event (Table 6) <span className="text-rose-500">*</span>
-                  </label>
-                  {medicalForm.eventId && (
-                    <span className="text-[10px] bg-red-50 text-red-700 border border-red-100 font-mono px-2 py-0.5 rounded font-bold">
-                      Selected: {medicalForm.eventId}
-                    </span>
-                  )}
-                </div>
+              {/* Read-only donation event info — set when lab results were encoded */}
+              {(() => {
+                const donorNumId = parseInt(String(editingMedicalDonor.id ?? '').replace(/^D0*/i, ''), 10);
+                const existingDonation = (donations || []).find(d =>
+                  parseInt(String(d.donorId ?? d.donor_id ?? ''), 10) === donorNumId
+                );
+                const evId = existingDonation?.eventId ?? existingDonation?.event_id ?? '—';
+                const evDate = existingDonation?.donationDate ?? existingDonation?.donation_date ?? '—';
+                const evObj = (donationEvents || []).find(ev =>
+                  String(ev.eventId ?? ev.event_id).toUpperCase() === String(evId).toUpperCase()
+                );
+                return (
+                  <div className="grid grid-cols-4 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-[10px] font-semibold text-slate-600">
+                    <div>
+                      <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">Event</span>
+                      <span className="font-mono text-red-700 font-bold">{evId}</span>
+                    </div>
+                    <div>
+                      <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">Date</span>
+                      <span className="font-mono">{evDate}</span>
+                    </div>
+                    <div>
+                      <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">City / Mun.</span>
+                      <span>{evObj?.cityMunicipality ?? evObj?.city_municipality ?? '—'}</span>
+                    </div>
+                    <div>
+                      <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">Venue</span>
+                      <span>{evObj?.barangayOrganization ?? evObj?.barangay_organization ?? '—'}</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
-                {/* Filter input */}
-                <div className="relative">
-                  <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-400" />
-                  <input
-                    type="text"
-                    value={eventSearchQuery}
-                    onChange={e => setEventSearchQuery(e.target.value)}
-                    placeholder="Search events by ID, date, province, municipality, or venue..."
-                    className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-[#C21C24] focus:border-[#C21C24] outline-none bg-slate-50/50"
-                  />
-                </div>
-
-                {/* Events list container */}
-                <div className="border border-slate-200 rounded-lg max-h-48 overflow-y-auto divide-y divide-slate-100 bg-white">
-                  {(() => {
-                    const filtered = (donationEvents || []).filter(ev => {
-                      const query = eventSearchQuery.toLowerCase();
-                      return (
-                        ev.eventId.toLowerCase().includes(query) ||
-                        (ev.province || '').toLowerCase().includes(query) ||
-                        (ev.cityMunicipality || '').toLowerCase().includes(query) ||
-                        (ev.barangayOrganization || '').toLowerCase().includes(query) ||
-                        (ev.eventDate || '').includes(query)
-                      );
-                    });
-
-                    if (filtered.length === 0) {
-                      return (
-                        <div className="p-4 text-center text-xs text-slate-400">
-                          No matching donation events found.
-                        </div>
-                      );
-                    }
-
-                    return filtered.map(ev => {
-                      const isSelected = medicalForm.eventId === ev.eventId;
-                      return (
-                        <button
-                          key={ev.eventId}
-                          type="button"
-                          onClick={() => {
-                            setMedicalForm(f => ({
-                              ...f,
-                              eventId: ev.eventId,
-                              donationDate: ev.eventDate || '',
-                              province: ev.province || '',
-                              cityMunicipality: ev.cityMunicipality || '',
-                              barangayOrganization: ev.barangayOrganization || ''
-                            }));
-                          }}
-                          className={`w-full text-left p-3 text-xs flex justify-between items-center transition-all ${isSelected
-                            ? 'bg-red-50/70 border-l-4 border-red-600 text-red-900 font-semibold'
-                            : 'hover:bg-slate-50 text-slate-700'
-                            }`}
-                        >
-                          <div>
-                            <div className="font-bold flex items-center gap-1.5">
-                              <span className="font-mono text-[10px]">{ev.eventId}</span>
-                              <span className="text-slate-300">|</span>
-                              <span>{ev.barangayOrganization || 'No Venue'}</span>
-                            </div>
-                            <div className="text-[10px] text-slate-450 mt-0.5">
-                              {ev.cityMunicipality}, {ev.province}
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold font-mono ${isSelected ? 'bg-red-100 text-red-800' : 'bg-slate-100 text-slate-650'
-                              }`}>
-                              {ev.eventDate}
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    });
-                  })()}
-                </div>
-              </div>
-
-              {/* Event details summary */}
-              <div className="grid grid-cols-4 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-[10px] font-semibold text-slate-600">
-                <div>
-                  <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">Date</span>
-                  <span className="font-mono">{medicalForm.donationDate || '—'}</span>
-                </div>
-                <div>
-                  <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">Province</span>
-                  <span>{medicalForm.province || '—'}</span>
-                </div>
-                <div>
-                  <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">City / Mun.</span>
-                  <span>{medicalForm.cityMunicipality || '—'}</span>
-                </div>
-                <div>
-                  <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">Barangay / Venue</span>
-                  <span>{medicalForm.barangayOrganization || '—'}</span>
-                </div>
-              </div>
-
-              {/* SECTION I-D: Screening Outcome */}
+              {/* Section I-D: Screening Outcome */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-[9px] font-extrabold uppercase tracking-widest text-white bg-blue-600 px-2 py-0.5 rounded">Section I-D</span>
@@ -2118,132 +1946,96 @@ export default function RegistryDashboard() {
                     <>
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Deferral Reason</label>
-                        <input type="text" value={medicalForm.deferralReason} onChange={e => setMedicalForm({ ...medicalForm, deferralReason: e.target.value })}
-                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none" placeholder="e.g. Low Hemoglobin" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Deferral End Date</label>
-                        <input type="date" value={medicalForm.deferralEndDate} onChange={e => setMedicalForm({ ...medicalForm, deferralEndDate: e.target.value })}
+                        <input type="text" value={medicalForm.deferralReason}
+                          onChange={e => setMedicalForm({ ...medicalForm, deferralReason: e.target.value })}
+                          placeholder="e.g. Low hemoglobin"
                           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none" />
                       </div>
+                      {medicalForm.screeningOutcome === 'Temporarily Deferred' && (
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Deferral End Date</label>
+                          <input type="date" value={medicalForm.deferralEndDate}
+                            onChange={e => setMedicalForm({ ...medicalForm, deferralEndDate: e.target.value })}
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none text-slate-600" />
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
               </div>
-
             </div>
 
             {/* Modal Footer */}
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between flex-shrink-0">
-              <p className="text-[10px] text-slate-400">
-                Onsite screening decisions will update the donor's eligibility status.
-              </p>
-              <div className="flex gap-3">
-                <button onClick={() => { setEditingMedicalDonor(null); setEventSearchQuery(''); }}
-                  className="px-4 py-2 text-xs font-bold text-slate-655 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200 bg-white">
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    const updatedStatus = medicalForm.screeningOutcome === 'Accepted' ? 'Regular' : 'Deferred';
-                    const remarks = medicalForm.screeningOutcome === 'Accepted' ? 'Eligible for Donation' : medicalForm.deferralReason || 'Deferred';
-                    
-                    updateDonorMedical(editingMedicalDonor.id, {
-                      ...medicalForm,
-                      status: updatedStatus,
-                      remarks
-                    });
-
-                    const donorName = editingMedicalDonor.name;
-                    const donorId = editingMedicalDonor.id;
-                    const savedForm = { ...medicalForm };
-
-                    setEditingMedicalDonor(null);
-                    setEventSearchQuery('');
-
-                    setScreeningSuccessModal({
-                      isOpen: true,
-                      donorId,
-                      donorName,
-                      outcome: savedForm.screeningOutcome,
-                      remarks,
-                      eventId: savedForm.eventId || 'EVT-001',
-                      venue: savedForm.barangayOrganization || savedForm.cityMunicipality || 'Davao City',
-                      donationDate: savedForm.donationDate || new Date().toISOString().slice(0, 10)
-                    });
-                  }}
-                  className="px-4 py-2 text-xs font-bold text-white bg-[#C21C24] hover:bg-[#A8181F] rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer">
-                  <CheckCircle className="w-3.5 h-3.5" /> Save Onsite Screening
-                </button>
+            <div className="px-6 py-4 border-t border-slate-100 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-slate-400">Onsite screening decisions will update the donor's eligibility status.</p>
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={() => { setEditingMedicalDonor(null); setEventSearchQuery(''); }}
+                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer">
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={false}
+                    onClick={async () => {
+                      // Look up the existing donation so we can pass donation_id to the API
+                      const donorNumId = parseInt(String(editingMedicalDonor.id ?? '').replace(/^D0*/i, ''), 10);
+                      const existingDonation = (donations || []).find(d =>
+                        parseInt(String(d.donorId ?? d.donor_id ?? ''), 10) === donorNumId
+                      );
+                      const donationNumId = parseInt(
+                        String(existingDonation?.donationId ?? existingDonation?.donation_id ?? '').replace(/^DON-0*/i, ''),
+                        10
+                      );
+                      const evId = existingDonation?.eventId ?? existingDonation?.event_id ?? '';
+                      const evDate = existingDonation?.donationDate ?? existingDonation?.donation_date ?? '';
+                      await updateDonorMedical(editingMedicalDonor.id, {
+                        donation_id: isNaN(donationNumId) ? null : donationNumId,
+                        eventId: evId,
+                        donationDate: evDate,
+                        screeningOutcome: medicalForm.screeningOutcome,
+                        deferralReason: medicalForm.deferralReason,
+                        deferralEndDate: medicalForm.deferralEndDate,
+                      });
+                      setScreeningSuccessModal({
+                        isOpen: true,
+                        donorId: editingMedicalDonor.id,
+                        donorName: editingMedicalDonor.name,
+                        outcome: medicalForm.screeningOutcome,
+                        remarks: medicalForm.deferralReason,
+                        eventId: evId,
+                        venue: '',
+                        donationDate: evDate,
+                      });
+                      setEditingMedicalDonor(null);
+                      setEventSearchQuery('');
+                      await fetchDonationsFromAPI();
+                    }}
+                    className="px-4 py-2 text-xs font-bold text-white bg-[#C21C24] hover:bg-red-800 rounded-full transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <CheckCircle className="w-3.5 h-3.5" /> Save Onsite Screening
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── ONSITE SCREENING SUCCESS CONFIRMATION MODAL ── */}
+      {/* â”€â”€ ONSITE SCREENING SUCCESS CONFIRMATION MODAL â”€â”€ */}
       <SuccessModal
         isOpen={screeningSuccessModal.isOpen}
-        title="Screening Outcome Recorded"
+        title="Screening Outcome Saved"
         message={`Onsite screening decisions updated for ${screeningSuccessModal.donorName}`}
-        confirmText="Acknowledge & Close"
+        confirmText="Done"
         onClose={() => setScreeningSuccessModal({ isOpen: false, donorId: '', donorName: '', outcome: '', remarks: '', eventId: '', venue: '', donationDate: '' })}
         details={[
-          { label: "Donor ID", value: screeningSuccessModal.donorId },
-          { label: "Outcome", value: screeningSuccessModal.outcome },
-          { label: "Linked Event", value: `${screeningSuccessModal.venue} (${screeningSuccessModal.eventId})` },
-          { label: "Remarks", value: screeningSuccessModal.remarks }
+          { label: 'Donor', value: screeningSuccessModal.donorName },
+          { label: 'Outcome', value: screeningSuccessModal.outcome },
+          { label: 'Event', value: screeningSuccessModal.eventId },
+          { label: 'Date', value: screeningSuccessModal.donationDate },
+          ...(screeningSuccessModal.remarks ? [{ label: 'Reason', value: screeningSuccessModal.remarks }] : []),
         ]}
-      />
-
-      {/* ── SMS RECALL CONFIRMATION & SUCCESS MODALS ── */}
-      <ConfirmationModal
-        isOpen={recallConfirm.isOpen}
-        title={recallConfirm.isBulk ? "Dispatch Bulk Recall?" : "Dispatch Recall SMS?"}
-        message={recallConfirm.isBulk 
-          ? `This will dispatch recall alerts to all ${recallConfirm.donorName} via Semaphore Gateway. Please confirm to proceed.`
-          : `This will dispatch a recall SMS to ${recallConfirm.donorName}. Please confirm to proceed.`}
-        confirmText="Confirm"
-        cancelText="Cancel"
-        variant="warning"
-        onConfirm={() => {
-          const donorName = recallConfirm.donorName;
-          const isBulk = recallConfirm.isBulk;
-          setRecallConfirm({ isOpen: false, donorId: '', donorName: '', isBulk: false });
-          if (isBulk) {
-            setSelectedRecallIds([]);
-            setRecallSuccess({
-              isOpen: true,
-              message: `Bulk SMS recall successfully dispatched via Semaphore Gateway.`
-            });
-          } else {
-            setRecallSuccess({
-              isOpen: true,
-              message: `Recall SMS has been dispatched via Semaphore Gateway to ${donorName}.`
-            });
-          }
-        }}
-        onCancel={() => setRecallConfirm({ isOpen: false, donorId: '', donorName: '', isBulk: false })}
-      />
-
-      <SuccessModal
-        isOpen={recallSuccess.isOpen}
-        title="Dispatched Successfully"
-        message={recallSuccess.message}
-        confirmText="Acknowledge & Close"
-        onClose={() => setRecallSuccess({ isOpen: false, message: '' })}
-      />
-
-      {/* ── NOTICE / VALIDATION MODAL ── */}
-      <ConfirmationModal
-        isOpen={noticeModal.isOpen}
-        title={noticeModal.title}
-        message={noticeModal.message}
-        confirmText="Got It"
-        cancelText=""
-        variant={noticeModal.variant}
-        onConfirm={() => setNoticeModal({ isOpen: false, title: '', message: '', variant: 'warning' })}
-        onCancel={() => setNoticeModal({ isOpen: false, title: '', message: '', variant: 'warning' })}
       />
 
     </div>

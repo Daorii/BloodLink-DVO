@@ -48,6 +48,10 @@ export default function IssuanceDashboard() {
     bloodIssuanceDetails,
     granularForecasts,
     generateGranularForecast,
+    fetchBloodRequestsFromAPI,
+    fetchBloodIssuancesFromAPI,
+    approveBloodRelease,
+    bloodIssuances,
     isSidebarCollapsed,
     toggleSidebar
   } = useBloodStore();
@@ -66,8 +70,10 @@ export default function IssuanceDashboard() {
   const isIssuanceStaff = role === 'Issuance Personnel';
   const hospitalId      = authSystemUser?.hospitalId || 'HOSP-001';
 
-  // Auto-generate forecast on mount for Issuance Personnel
+  // Load blood requests + issuances from DB and auto-generate forecast on mount
   useEffect(() => {
+    fetchBloodRequestsFromAPI();
+    fetchBloodIssuancesFromAPI();
     if (role === 'Issuance Personnel' && (!granularForecasts || granularForecasts.length === 0)) {
       generateGranularForecast(4);
     }
@@ -120,13 +126,34 @@ export default function IssuanceDashboard() {
     setSuccessModal({
       isOpen: true,
       title: 'Requisition Verified!',
-      message: `Blood Request ${refNo} has been successfully verified and sent to the Blood Bank for physical bag allocation & dispatch.`
+      message: `Blood Request ${refNo} has been successfully verified and forwarded to the Blood Bank for physical preparation.`
     });
   };
 
-  const pendingCount  = myRequests.filter(r => r.status === 'Pending Verification' || r.status === 'Pending').length;
-  const verifiedCount = myRequests.filter(r => r.status === 'Verified').length;
-  const approvedCount = myRequests.filter(r => r.status === 'Issued' || r.status === 'Approved').length;
+  const handleApproveRelease = async (req) => {
+    // Look up the matching issuance record from bloodIssuances by requestId
+    const issuance = (bloodIssuances || []).find(i => i.requestId === req.requestId);
+    if (!issuance) {
+      alert('No issuance record found for this request. The Blood Bank may not have processed it yet.');
+      return;
+    }
+    const result = await approveBloodRelease({ issuanceId: issuance.issuanceId, remarks: '' });
+    if (result.success) {
+      setSuccessModal({
+        isOpen: true,
+        title: 'Release Approved!',
+        message: `Blood units for ${req.refNo} have been released to ${req.hospital}. The request is now marked Released.`
+      });
+    } else {
+      alert('Failed to approve release: ' + result.error);
+    }
+  };
+
+  // Updated counts using new status values
+  const pendingCount      = myRequests.filter(r => r.status === 'Pending Verification' || r.status === 'Pending').length;
+  const verifiedCount     = myRequests.filter(r => r.status === 'Verified').length;
+  const readyForReleaseCount = myRequests.filter(r => r.status === 'Ready for Release' || r.status === 'Partially Fulfilled').length;
+  const releasedCount     = myRequests.filter(r => r.status === 'Released').length;
   const getInv = (type) => inventory.find(i => i.type === type);
 
   const handleFormChange = (e) => {
@@ -158,7 +185,7 @@ export default function IssuanceDashboard() {
     setCartItems(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (cartItems.length === 0) {
       setCartError('Please add at least one blood component to the requisition.');
@@ -172,12 +199,12 @@ export default function IssuanceDashboard() {
       submittingHospitalId = selHosp?.id || 'HOSP-001';
       submittingHospitalName = selHosp?.name || 'Unknown Hospital';
     }
-    const refNo = addBloodRequest({
+    const refNo = await addBloodRequest({
       ...form,
       hospital: submittingHospitalName,
       hospitalId: submittingHospitalId,
       items: cartItems,
-      filedByIssuance: isIssuanceStaff, // tag so we can filter 'mine'
+      filedByIssuance: isIssuanceStaff,
       filedBy: authSystemUser?.name || 'Issuance Personnel',
     });
     setSubmitted(refNo);
@@ -365,7 +392,7 @@ export default function IssuanceDashboard() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {(isHospitalUser || isIssuanceStaff) && (
+            {isHospitalUser && (
               <button onClick={openNewForm}
                 className="bg-[#C21C24] hover:bg-[#A8181F] text-white px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer">
                 <Plus className="w-3.5 h-3.5" /> New Blood Request
@@ -418,14 +445,14 @@ export default function IssuanceDashboard() {
               <p className="text-[10px] text-slate-450 mt-1 font-semibold">Awaiting issuance action</p>
             </div>
             <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Verified (Wait Bank)</p>
-              <p className="text-2xl font-extrabold text-indigo-600 font-mono">{verifiedCount}</p>
-              <p className="text-[10px] text-slate-450 mt-1 font-semibold">Confirmed, awaiting dispatch</p>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Ready for Release</p>
+              <p className="text-2xl font-extrabold text-blue-600 font-mono">{readyForReleaseCount}</p>
+              <p className="text-[10px] text-slate-450 mt-1 font-semibold">Blood Bank prepared — approve release</p>
             </div>
             <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Dispatched & Issued</p>
-              <p className="text-2xl font-extrabold text-emerald-600 font-mono">{approvedCount}</p>
-              <p className="text-[10px] text-slate-450 mt-1 font-semibold">Fulfilled by blood bank</p>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Released</p>
+              <p className="text-2xl font-extrabold text-emerald-600 font-mono">{releasedCount}</p>
+              <p className="text-[10px] text-slate-450 mt-1 font-semibold">Fulfilled & physically released</p>
             </div>
           </div>
 
@@ -529,21 +556,34 @@ export default function IssuanceDashboard() {
                                 className="text-slate-500 hover:bg-slate-100 p-1.5 rounded-lg transition-colors" title="View Details">
                                 <Eye className="w-4 h-4" />
                               </button>
-                              {/* Verify / Reject - issuance staff only, for pending hospital-submitted requests */}
+                              {/* Verify / Reject — pending hospital-submitted requests */}
                               {isIssuanceStaff && (req.status === 'Pending Verification' || req.status === 'Pending') && !req.filedByIssuance && (
                                 <>
-                                  <button onClick={() => handleVerify(req.refNo)} className="text-[#C21C24] hover:bg-rose-50 p-1.5 rounded-lg transition-colors font-bold flex items-center gap-0.5" title="Verify & Send to Bank">
-                                    <CheckCircle className="w-4 h-4 text-indigo-650" /> <span className="text-[10px] text-indigo-700">Verify</span>
+                                  <button onClick={() => handleVerify(req.refNo)} className="text-indigo-700 hover:bg-indigo-50 p-1.5 rounded-lg transition-colors font-bold flex items-center gap-0.5" title="Verify & Forward to Blood Bank">
+                                    <CheckCircle className="w-4 h-4 text-indigo-600" /> <span className="text-[10px]">Verify</span>
                                   </button>
                                   <button onClick={() => openReject(req)} className="text-[#C21C24] hover:bg-rose-50 p-1.5 rounded-lg transition-colors" title="Reject">
                                     <XCircle className="w-4 h-4" />
                                   </button>
                                 </>
                               )}
-                              {isIssuanceStaff && ((req.status !== 'Pending Verification' && req.status !== 'Pending') || req.filedByIssuance) && (
+                              {/* Approve Release — once Blood Bank has prepared the units */}
+                              {isIssuanceStaff && (req.status === 'Ready for Release' || req.status === 'Partially Fulfilled') && (
+                                <button onClick={() => handleApproveRelease(req)}
+                                  className="text-emerald-700 hover:bg-emerald-50 p-1.5 rounded-lg transition-colors font-bold flex items-center gap-0.5" title="Approve Physical Release">
+                                  <CheckCircle className="w-4 h-4 text-emerald-600" /> <span className="text-[10px]">Release</span>
+                                </button>
+                              )}
+                              {/* Status labels for non-actionable states */}
+                              {isIssuanceStaff && !['Pending Verification', 'Pending', 'Ready for Release', 'Partially Fulfilled'].includes(req.status) && (
                                 <span className="text-slate-400 text-[10px] font-semibold">
-                                  {req.status === 'Verified' ? 'Sent to Bank' : req.status}
+                                  {req.status === 'Verified' ? 'With Blood Bank' :
+                                   req.status === 'Released' ? '✓ Released' :
+                                   req.status === 'Rejected' ? '✗ Rejected' : req.status}
                                 </span>
+                              )}
+                              {isIssuanceStaff && req.filedByIssuance && (req.status === 'Pending Verification' || req.status === 'Pending') && (
+                                <span className="text-slate-400 text-[10px] font-semibold">Filed by Staff</span>
                               )}
                             </div>
                           </td>
@@ -603,40 +643,79 @@ export default function IssuanceDashboard() {
           )}
 
           {isIssuanceStaff && activeTab === 'issuance_details' && (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
-                <Activity className="w-4 h-4 text-[#C21C24]" />
-                <h3 className="text-slate-900 font-bold text-xs uppercase tracking-wider">Blood Issuance Details (Line Items)</h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs font-semibold">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
-                      <th className="px-6 py-3 font-bold">Detail ID</th>
-                      <th className="px-6 py-3 font-bold">Issuance ID</th>
-                      <th className="px-6 py-3 font-bold">Unit ID</th>
-                      <th className="px-6 py-3 font-bold text-right">Quantity (mL)</th>
-                      <th className="px-6 py-3 font-bold">Description</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {bloodIssuanceDetails && bloodIssuanceDetails.length > 0 ? (
-                      bloodIssuanceDetails.map(detail => (
-                        <tr key={detail.detailId} className="hover:bg-slate-50/50">
-                          <td className="px-6 py-3 font-mono font-bold text-slate-700">{detail.detailId}</td>
-                          <td className="px-6 py-3 font-mono text-slate-500">{detail.issuanceId}</td>
-                          <td className="px-6 py-3 font-mono text-slate-500">{detail.unitId}</td>
-                          <td className="px-6 py-3 text-right text-slate-800 font-bold">{parseFloat(detail.quantity).toFixed(2)} mL</td>
-                          <td className="px-6 py-3 text-slate-500 font-normal">Line items for each issuance — the specific units released.</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center text-slate-400 font-normal">No blood issuance detail records found.</td>
+            <div className="space-y-5 animate-in fade-in duration-200">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-[#C21C24]" />
+                    <h3 className="text-slate-900 font-bold text-xs uppercase tracking-wider">Blood Issuance Audit Log</h3>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-semibold">{(bloodIssuances || []).length} record(s)</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs font-semibold">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
+                        <th className="px-6 py-3">Issuance Ref</th>
+                        <th className="px-6 py-3">Request</th>
+                        <th className="px-6 py-3">Hospital</th>
+                        <th className="px-6 py-3">Items Issued</th>
+                        <th className="px-6 py-3">Processed By</th>
+                        <th className="px-6 py-3">Issuance Date</th>
+                        <th className="px-6 py-3">Released By</th>
+                        <th className="px-6 py-3">Release Date</th>
+                        <th className="px-6 py-3 text-center">Status</th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(bloodIssuances || []).length > 0 ? (
+                        (bloodIssuances || []).map(iss => (
+                          <tr key={iss.issuanceId} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-6 py-3.5 font-mono font-bold text-slate-700">{iss.issuanceRef}</td>
+                            <td className="px-6 py-3.5 font-mono text-slate-500">{iss.requestRef}</td>
+                            <td className="px-6 py-3.5 font-bold text-slate-900">{iss.hospital}</td>
+                            <td className="px-6 py-3.5">
+                              <div className="space-y-0.5">
+                                {(iss.items || []).map((item, i) => (
+                                  <div key={i} className="text-[10px] text-slate-600">
+                                    <span className="font-mono font-bold text-slate-700">{item.bloodType}</span>
+                                    {' · '}{item.component}
+                                    {' × '}<span className="font-bold">{item.quantityIssued}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="px-6 py-3.5 text-slate-600">{iss.processedBy}</td>
+                            <td className="px-6 py-3.5 text-slate-500 font-normal">{iss.issuanceDate}</td>
+                            <td className="px-6 py-3.5 text-slate-600">{iss.releaseApprovedBy || <span className="text-slate-300">—</span>}</td>
+                            <td className="px-6 py-3.5 text-slate-500 font-normal">{iss.releaseDate || <span className="text-slate-300">—</span>}</td>
+                            <td className="px-6 py-3.5 text-center">
+                              {iss.status === 'Released' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                  <CheckCircle className="w-3 h-3" /> Released
+                                </span>
+                              ) : iss.status === 'Cancelled' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-red-50 text-red-700 border border-red-100">
+                                  <XCircle className="w-3 h-3" /> Cancelled
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100">
+                                  <Clock className="w-3 h-3" /> Prepared
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={9} className="px-6 py-10 text-center text-slate-400 font-normal">
+                            No issuance records yet. Records appear here once the Blood Bank processes a request.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

@@ -787,7 +787,6 @@ export default function Home() {
         image={snbc1}
         imageAlt="National Blood Center Mindanao, Davao City"
         title="BLOODLINK"
-        subtitle="BloodLink DVO connects SPMC, PRC, and SNBC so shortages reach matched donors in minutes, not hours."
         onLogin={() => setShowModal(true)}
       />
 

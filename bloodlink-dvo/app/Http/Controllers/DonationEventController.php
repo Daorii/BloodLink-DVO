@@ -38,10 +38,38 @@ class DonationEventController extends Controller
         ], 201);
     }
 
+    public function update(Request $request, int $id): JsonResponse
+    {
+        $event = DonationEvent::findOrFail($id);
+
+        $v = $request->validate([
+            'province'             => 'sometimes|required|string|max:100',
+            'cityMunicipality'     => 'sometimes|required|string|max:100',
+            'barangayOrganization' => 'nullable|string|max:100',
+            'eventDate'            => 'sometimes|required|date',
+        ]);
+
+        $updates = [];
+        if (isset($v['province']))             $updates['province']              = $v['province'];
+        if (isset($v['cityMunicipality']))     $updates['city_municipality']     = $v['cityMunicipality'];
+        if (array_key_exists('barangayOrganization', $v)) $updates['barangay_organization'] = $v['barangayOrganization'];
+        if (isset($v['eventDate']))            $updates['event_date']            = $v['eventDate'];
+
+        $event->update($updates);
+
+        return response()->json([
+            'donationEvent' => $this->format($event),
+            'message'       => 'Donation event updated successfully.',
+        ]);
+    }
+
     public function destroy(int $id): JsonResponse
     {
-        DonationEvent::findOrFail($id)->delete();
-        return response()->json(['message' => 'Event deleted.']);
+        $event = DonationEvent::find($id);
+        if ($event) {
+            $event->delete();
+        }
+        return response()->json(['message' => 'Event deleted successfully.']);
     }
 
     private function format(DonationEvent $e): array

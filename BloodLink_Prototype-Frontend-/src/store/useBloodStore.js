@@ -3,7 +3,11 @@ import { persist } from 'zustand/middleware';
 import { apiLogin, apiLogout, apiGetUsers, apiCreateUser, apiUpdateUser, clearToken } from '../services/api';
 import { apiGetHospitals, apiCreateHospital, apiUpdateHospital, apiDeleteHospital } from '../services/api';
 import { apiGetDonors, apiCreateDonor, apiUpdateDonor, apiDeleteDonor } from '../services/api';
-import { apiGetDonationEvents, apiCreateDonationEvent } from '../services/api';
+import { apiGetDonationEvents, apiCreateDonationEvent, apiUpdateDonationEvent, apiDeleteDonationEvent } from '../services/api';
+import { apiCreateDonation, apiGetDonations, apiUpdateDonationOutcome } from '../services/api';
+import { apiCreateLabResult, apiGetLabResults } from '../services/api';
+import { apiGetBloodRequests, apiCreateBloodRequest, apiUpdateBloodRequestStatus } from '../services/api';
+import { apiGetBloodIssuances, apiCreateBloodIssuance, apiApproveBloodRelease } from '../services/api';
 
 const initialDonors = [
   // ── Sample Dataset: Donor Registrationssss ──
@@ -517,8 +521,10 @@ export const useBloodStore = create(
       recommendations: initialRecommendations,
       auditLogs: initialAuditLogs,
       donorRecalls: initialDonorRecalls,
+      recalls: [], // API-backed recall history
       bloodIssuance: [],
       bloodIssuanceDetails: [],
+      bloodIssuances: [], // DB-backed issuances
       inventory: initialInventory,
       bloodRequests: initialRequests,
       hospitals: initialHospitals,
@@ -744,6 +750,79 @@ export const useBloodStore = create(
         }
       },
 
+      fetchDonationsFromAPI: async () => {
+        try {
+          const data = await apiGetDonations();
+          if (data.donations) set({ donations: data.donations });
+        } catch (err) {
+          console.warn('[BloodLink] Could not fetch donations from API:', err.message);
+        }
+      },
+
+      fetchBloodRequestsFromAPI: async () => {
+        try {
+          const data = await apiGetBloodRequests();
+          if (data.bloodRequests) set({ bloodRequests: data.bloodRequests });
+        } catch (err) {
+          console.warn('[BloodLink] Could not fetch blood requests from API:', err.message);
+        }
+      },
+
+      fetchBloodIssuancesFromAPI: async () => {
+        try {
+          const data = await apiGetBloodIssuances();
+          if (data.issuances) set({ bloodIssuances: data.issuances });
+        } catch (err) {
+          console.warn('[BloodLink] Could not fetch blood issuances from API:', err.message);
+        }
+      },
+
+      // Blood Bank Staff: process a verified request → creates issuance, sets request to Ready for Release
+      processBloodRequest: async ({ requestId, requestRef, items, remarks, isPartial }) => {
+        try {
+          const data = await apiCreateBloodIssuance({ requestId, items, remarks, isPartial });
+          if (data.issuance) {
+            set(state => ({ bloodIssuances: [data.issuance, ...state.bloodIssuances] }));
+          }
+          // Refresh requests so status updates
+          const reqData = await apiGetBloodRequests();
+          if (reqData.bloodRequests) set({ bloodRequests: reqData.bloodRequests });
+          return { success: true, issuance: data.issuance };
+        } catch (err) {
+          console.error('[BloodLink] processBloodRequest failed:', err.message);
+          return { success: false, error: err.message };
+        }
+      },
+
+      // Issuance Personnel: approve physical release of prepared blood units
+      approveBloodRelease: async ({ issuanceId, remarks }) => {
+        try {
+          const data = await apiApproveBloodRelease(issuanceId, { remarks });
+          if (data.issuance) {
+            set(state => ({
+              bloodIssuances: state.bloodIssuances.map(i =>
+                i.issuanceId === issuanceId ? data.issuance : i
+              )
+            }));
+          }
+          const reqData = await apiGetBloodRequests();
+          if (reqData.bloodRequests) set({ bloodRequests: reqData.bloodRequests });
+          return { success: true };
+        } catch (err) {
+          console.error('[BloodLink] approveBloodRelease failed:', err.message);
+          return { success: false, error: err.message };
+        }
+      },
+
+      fetchLabResultsFromAPI: async () => {
+        try {
+          const data = await apiGetLabResults();
+          if (data.labResults) set({ labTestResults: data.labResults });
+        } catch (err) {
+          console.warn('[BloodLink] Could not fetch lab results from API:', err.message);
+        }
+      },
+
       addDonationEvent: async (eventForm) => {
         const payload = {
           province:             eventForm.province || '',
@@ -771,6 +850,52 @@ export const useBloodStore = create(
         const newEvent = { eventId, event_id: eventId, province: payload.province, cityMunicipality: payload.cityMunicipality, city_municipality: payload.cityMunicipality, barangayOrganization: payload.barangayOrganization, barangay_organization: payload.barangayOrganization, eventDate: payload.eventDate, event_date: payload.eventDate, createdAt: new Date().toLocaleString(), created_at: new Date().toLocaleString() };
         set((s) => ({ donationEvents: [...s.donationEvents, newEvent], auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: s.authSystemUser?.id || 'USR-001', action: `Added Donation Event: ${newEvent.barangayOrganization} (${newEvent.eventDate})`, module: 'Donation Events', recordId: eventId, oldValue: null, newValue: JSON.stringify(newEvent), performedAt: new Date().toLocaleString() }, ...s.auditLogs] }));
         return newEvent;
+      },
+
+      updateDonationEvent: async (eventId, eventForm) => {
+        const numericId = parseInt(String(eventId).replace('EVT-', ''), 10);
+        const payload = {
+          province:             eventForm.province,
+          cityMunicipality:     eventForm.cityMunicipality,
+          barangayOrganization: eventForm.barangayOrganization,
+          eventDate:            eventForm.eventDate,
+        };
+
+        if (!isNaN(numericId)) {
+          try {
+            const data = await apiUpdateDonationEvent(numericId, payload);
+            if (data.donationEvent) {
+              set((s) => ({
+                donationEvents: s.donationEvents.map(e => (e.eventId === eventId || e.event_id === eventId) ? { ...e, ...data.donationEvent } : e),
+                auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: s.authSystemUser?.id || 'USR-001', action: `Updated Donation Event: ${data.donationEvent.barangayOrganization} (${data.donationEvent.eventDate})`, module: 'Donation Events', recordId: eventId, oldValue: null, newValue: JSON.stringify(data.donationEvent), performedAt: new Date().toLocaleString() }, ...s.auditLogs]
+              }));
+              return;
+            }
+          } catch (err) {
+            console.error('[BloodLink] API updateDonationEvent failed:', err.message);
+          }
+        }
+
+        // Fallback: local-only
+        set((s) => ({
+          donationEvents: s.donationEvents.map(e => (e.eventId === eventId || e.event_id === eventId) ? { ...e, ...payload, city_municipality: payload.cityMunicipality, barangay_organization: payload.barangayOrganization, event_date: payload.eventDate } : e)
+        }));
+      },
+
+      deleteDonationEvent: async (eventId) => {
+        const numericId = parseInt(String(eventId).replace('EVT-', ''), 10);
+        if (!isNaN(numericId)) {
+          try {
+            await apiDeleteDonationEvent(numericId);
+          } catch (err) {
+            console.error('[BloodLink] API deleteDonationEvent failed:', err.message);
+          }
+        }
+
+        set((s) => ({
+          donationEvents: s.donationEvents.filter(e => e.eventId !== eventId && e.event_id !== eventId),
+          auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: s.authSystemUser?.id || 'USR-001', action: `Deleted Donation Event ${eventId}`, module: 'Donation Events', recordId: eventId, oldValue: null, newValue: null, performedAt: new Date().toLocaleString() }, ...s.auditLogs]
+        }));
       },
 
 
@@ -1020,61 +1145,62 @@ export const useBloodStore = create(
         return id;
       },
 
-      updateDonorMedical: (id, medicalForm) => {
+      updateDonorMedical: async (id, medicalForm) => {
+        // This now calls PUT /api/donations/{id}/outcome
+        // The donation record must already exist (created by lab staff)
+        const numericDonationId = medicalForm.donation_id || null;
+
+        if (numericDonationId) {
+          try {
+            await apiUpdateDonationOutcome(numericDonationId, {
+              screeningOutcome: medicalForm.screeningOutcome || 'Accepted',
+              deferralReason:   medicalForm.deferralReason  || null,
+              deferralEndDate:  medicalForm.deferralEndDate || null,
+            });
+          } catch (err) {
+            console.error('[BloodLink] API updateDonationOutcome failed:', err.message, err.status || '');
+          }
+        }
+
+        // Always update local state
         set((state) => {
-          const donationId = 'DON-' + Math.floor(100 + Math.random() * 900);
-          const testId = 'LAB-' + Math.floor(100 + Math.random() * 900);
-
-          const newDonation = {
-            donationId,
-            donorId: id,
-            eventId: medicalForm.eventId || 'EVT-001',
-            bloodTypeId: medicalForm.bloodType || 'O+',
-            donationDate: medicalForm.donationDate || new Date().toISOString().slice(0, 10),
-            screeningOutcome: medicalForm.screeningOutcome || 'Accepted',
-            deferralReason: medicalForm.deferralReason || '',
-            deferralEndDate: medicalForm.deferralEndDate || ''
-          };
-
-          const newLabResult = {
-            testId,
-            donationId,
-            hemoglobinResult: medicalForm.hemoglobinResult || '14.5',
-            bloodTypeConfirmed: medicalForm.bloodType || 'O+',
-            hbsagResult: medicalForm.hbsagResult || 'Non-Reactive',
-            syphilisResult: medicalForm.syphilisResult || 'Non-Reactive',
-            hivResult: medicalForm.hivResult || 'Non-Reactive',
-            hcvResult: medicalForm.hcvResult || 'Non-Reactive',
-            malariaResult: medicalForm.malariaResult || 'Non-Reactive',
-            natResult: medicalForm.natResult || 'Non-Reactive',
-            othersResult: '',
-            recordedBy: state.authSystemUser?.id || 'USR-003'
-          };
-
-          const auditLogId = 'LOG-' + Math.floor(100 + Math.random() * 900);
-          const newAuditLog = {
-            logId: auditLogId,
-            userId: state.authSystemUser?.id || 'USR-003',
-            action: `Recorded Onsite Screening Outcome for donor ${id}`,
-            module: 'Registry',
-            recordId: id,
-            oldValue: JSON.stringify(state.donors.find(d => d.id === id) || null),
-            newValue: JSON.stringify(medicalForm),
-            performedAt: new Date().toLocaleString()
-          };
-
           const updatedDonors = state.donors.map(d => d.id === id ? { ...d, ...medicalForm } : d);
-
+          const auditLogId = 'LOG-' + Math.floor(100 + Math.random() * 900);
           return {
             donors: updatedDonors,
-            donations: [newDonation, ...state.donations],
-            labTestResults: [newLabResult, ...state.labTestResults],
-            auditLogs: [newAuditLog, ...state.auditLogs]
+            auditLogs: [{ logId: auditLogId, userId: state.authSystemUser?.id || 'USR-003', action: `Recorded Screening Outcome for donor ${id}`, module: 'Registry', recordId: id, oldValue: null, newValue: JSON.stringify(medicalForm), performedAt: new Date().toLocaleString() }, ...state.auditLogs]
           };
         });
       },
 
-      addLabTestResult: (labForm) => {
+      addLabTestResult: async (labForm) => {
+        // ── Try API first: create donation record + lab results together ──
+        const numericDonorId  = parseInt(String(labForm.donorId  ?? '').replace(/^D0*/i, ''), 10);
+        const numericEventId  = labForm.eventId
+          ? parseInt(String(labForm.eventId).replace(/^EVT-0*/i, ''), 10) : null;
+
+        if (!isNaN(numericDonorId)) {
+          try {
+            await apiCreateLabResult({
+              donorId:            numericDonorId,
+              eventId:            (!isNaN(numericEventId) ? numericEventId : null),
+              donationDate:       labForm.donationDate || new Date().toISOString().slice(0, 10),
+              hemoglobinResult:   labForm.hemoglobinResult   || null,
+              bloodTypeConfirmed: labForm.bloodTypeConfirmed || null,
+              hbsagResult:        labForm.hbsagResult        || null,
+              syphilisResult:     labForm.syphilisResult     || null,
+              hivResult:          labForm.hivResult          || null,
+              hcvResult:          labForm.hcvResult          || null,
+              malariaResult:      labForm.malariaResult      || null,
+              natResult:          labForm.natResult          || null,
+              othersResult:       labForm.othersResult       || null,
+            });
+          } catch (err) {
+            console.error('[BloodLink] API createLabResult failed:', err.message, err.status || '');
+          }
+        }
+
+        // ── Always update local state ──
         set((state) => {
           const testId = 'LAB-' + Math.floor(100 + Math.random() * 900);
           const newLabResult = {
@@ -1215,7 +1341,7 @@ export const useBloodStore = create(
       },
 
       // ─── Blood Requests ─────────────────────────────────────────────────
-      addBloodRequest: (reqForm) => {
+      addBloodRequest: async (reqForm) => {
         const refNo = 'REQ-' + Math.floor(1000 + Math.random() * 9000);
         const dateString = new Date().toLocaleDateString('en-US', {
           month: 'short', day: 'numeric', year: 'numeric'
@@ -1223,6 +1349,7 @@ export const useBloodStore = create(
 
         const newRequest = {
           refNo,
+          requestId: null, // will be set from API response
           hospital: reqForm.hospital || 'Unknown Hospital',
           hospitalId: reqForm.hospitalId || 'HOSP-001',
           urgency: reqForm.urgency || 'routine',
@@ -1236,15 +1363,44 @@ export const useBloodStore = create(
           notes: reqForm.notes || '',
           hospitalRefNo: reqForm.hospitalRefNo || '',
           statusNote: '',
-          items: reqForm.items || [], // Array of { bloodType, component, units }
-          filedByIssuance: reqForm.filedByIssuance || false, // true if filed by Issuance Personnel
-          filedBy: reqForm.filedBy || null, // name of the issuance officer who filed it
+          items: reqForm.items || [],
+          filedByIssuance: reqForm.filedByIssuance || false,
+          filedBy: reqForm.filedBy || null,
         };
+
+        // Try API
+        try {
+          const hospitalNumId = parseInt(String(reqForm.hospitalId || '').replace(/^HOSP-0*/i, ''), 10);
+          const data = await apiCreateBloodRequest({
+            hospitalId:          isNaN(hospitalNumId) ? 1 : hospitalNumId,
+            urgency:             reqForm.urgency ? (reqForm.urgency.charAt(0).toUpperCase() + reqForm.urgency.slice(1)) : 'Routine',
+            dateNeeded:          reqForm.dateNeeded || '',
+            requestingPersonnel: reqForm.contactPerson || reqForm.filedBy || 'Unknown',
+            hospitalRefNo:       reqForm.hospitalRefNo || null,
+            ward:                reqForm.ward || null,
+            diagnosis:           reqForm.diagnosis || null,
+            remarks:             reqForm.notes || null,
+            filedByIssuance:     reqForm.filedByIssuance || false,
+            items:               (reqForm.items || []).map(i => ({ bloodType: i.bloodType, component: i.component, units: i.units })),
+          });
+          if (data.bloodRequest) {
+            newRequest.refNo      = data.bloodRequest.refNo || refNo;
+            newRequest.requestId  = data.bloodRequest.requestId ?? null;
+          }
+        } catch (err) {
+          console.error('[BloodLink] API createBloodRequest failed:', err.message);
+        }
+
         set((state) => ({ bloodRequests: [newRequest, ...state.bloodRequests] }));
-        return refNo;
+        return newRequest.refNo;
       },
 
-      updateBloodRequestStatus: (refNo, status, statusNote = '') => {
+      updateBloodRequestStatus: async (refNo, status, statusNote = '') => {
+        // Try API
+        try {
+          const req = get().bloodRequests.find(r => r.refNo === refNo);
+          if (req?.requestId) await apiUpdateBloodRequestStatus(req.requestId, { status, remarks: statusNote });
+        } catch (err) { console.error('[BloodLink] API updateBloodRequestStatus failed:', err.message); }
         set((state) => ({
           bloodRequests: state.bloodRequests.map((req) =>
             req.refNo === refNo ? { ...req, status, statusNote } : req
@@ -1252,37 +1408,39 @@ export const useBloodStore = create(
         }));
       },
 
-      rejectRequest: (refNo) => {
+      rejectRequest: async (refNo) => {
+        try {
+          const req = get().bloodRequests.find(r => r.refNo === refNo);
+          if (req?.requestId) await apiUpdateBloodRequestStatus(req.requestId, { status: 'Rejected' });
+        } catch (err) { console.error('[BloodLink] API rejectRequest failed:', err.message); }
         set((state) => ({
           bloodRequests: state.bloodRequests.map(req => req.refNo === refNo ? { ...req, status: 'Rejected' } : req)
         }));
       },
 
-      verifyRequest: (refNo) => {
+      verifyRequest: async (refNo) => {
+        try {
+          const req = get().bloodRequests.find(r => r.refNo === refNo);
+          if (req?.requestId) await apiUpdateBloodRequestStatus(req.requestId, { status: 'Verified' });
+        } catch (err) { console.error('[BloodLink] API verifyRequest failed:', err.message); }
         set((state) => {
           const req = state.bloodRequests.find(r => r.refNo === refNo);
           if (!req) return state;
-
           const auditLogId = 'LOG-' + Math.floor(100 + Math.random() * 900);
-          const newAuditLog = {
-            logId: auditLogId,
-            userId: state.authSystemUser?.id || 'USR-005',
-            action: `Verified Request ${refNo} for ${req.hospital} (Sent to Blood Bank)`,
-            module: 'Issuance',
-            recordId: refNo,
-            oldValue: 'Pending Verification',
-            newValue: 'Verified',
-            performedAt: new Date().toLocaleString()
-          };
-
           return {
             bloodRequests: state.bloodRequests.map(r => r.refNo === refNo ? { ...r, status: 'Verified' } : r),
-            auditLogs: [newAuditLog, ...state.auditLogs]
+            auditLogs: [{ logId: auditLogId, userId: state.authSystemUser?.id || 'USR-005', action: `Verified Request ${refNo} for ${req.hospital} (Sent to Blood Bank)`, module: 'Issuance', recordId: refNo, oldValue: 'Pending Verification', newValue: 'Verified', performedAt: new Date().toLocaleString() }, ...state.auditLogs]
           };
         });
       },
 
-      approveRequest: (refNo) => {
+      approveRequest: async (refNo) => {
+        // Persist to DB first
+        try {
+          const req = get().bloodRequests.find(r => r.refNo === refNo);
+          if (req?.requestId) await apiUpdateBloodRequestStatus(req.requestId, { status: 'Fulfilled' });
+        } catch (err) { console.error('[BloodLink] API approveRequest failed:', err.message); }
+
         set((state) => {
           const req = state.bloodRequests.find(r => r.refNo === refNo);
           if (!req) return state;
@@ -1631,19 +1789,58 @@ export const useBloodStore = create(
         set((state) => ({ smsLogs: [log, ...state.smsLogs] }));
       },
 
-      dispatchRecallSMS: (donorId, processedBy = null) => {
-        set((state) => {
-          const recallId = 'REC-L' + Math.floor(100 + Math.random() * 900);
-          const newRecall = {
-            recallId,
-            donorId,
-            recallDate: new Date().toISOString().split('T')[0],
-            smsStatus: 'Sent',
-            donorResponse: null,
-            processedBy
-          };
-          return { donorRecalls: [newRecall, ...state.donorRecalls] };
-        });
+      // Fetch all recall records from API
+      fetchRecallsFromAPI: async () => {
+        try {
+          const { data } = await api.get('/recalls');
+          if (data.recalls) set({ recalls: data.recalls });
+        } catch (e) {
+          console.error('fetchRecallsFromAPI error:', e);
+        }
+      },
+
+      dispatchRecallSMS: async (donorId, processedBy = null) => {
+        try {
+          const numericId = parseInt(String(donorId).replace(/^D0*/i, ''), 10);
+          const { data } = await api.post('/recalls', {
+            donor_id: numericId,
+            recall_reason: 'Critical Shortage Match',
+          });
+          // Prepend to API-backed list
+          set((state) => ({ recalls: [data.recall, ...state.recalls] }));
+          // Also update legacy local state for compatibility
+          set((state) => ({
+            donorRecalls: [{
+              recallId: 'REC-' + data.recall.recallId,
+              donorId,
+              recallDate: data.recall.recallDate,
+              smsStatus: data.recall.smsStatus,
+              donorResponse: null,
+              processedBy
+            }, ...state.donorRecalls]
+          }));
+          return data;
+        } catch (e) {
+          console.error('dispatchRecallSMS error:', e);
+          throw e;
+        }
+      },
+
+      dispatchBulkRecallSMS: async (donorIds, processedBy = null) => {
+        try {
+          const numericIds = donorIds.map(id => parseInt(String(id).replace(/^D0*/i, ''), 10));
+          const { data } = await api.post('/recalls/bulk', {
+            donor_ids: numericIds,
+            recall_reason: 'Critical Shortage Match',
+          });
+          if (data.recalls) {
+            set((state) => ({ recalls: [...data.recalls, ...state.recalls] }));
+          }
+          return data;
+        } catch (e) {
+          console.error('dispatchBulkRecallSMS error:', e);
+          throw e;
+        }
       },
 
       resetMobilization: () => {
