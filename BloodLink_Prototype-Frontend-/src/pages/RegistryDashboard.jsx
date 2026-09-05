@@ -55,7 +55,7 @@ export default function RegistryDashboard() {
     });
   }, [donors]);
 
-  const [tab, setTab] = useState('registry');
+  const [tab, setTab] = useState(authSystemUser?.role === 'Serology Staff' ? 'laboratory' : 'registry');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Recall tab search/filter

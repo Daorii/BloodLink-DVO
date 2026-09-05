@@ -36,7 +36,7 @@ export default function BloodBankDashboard() {
     processBloodRequest, bloodIssuances,
   } = useBloodStore();
 
-  const [tab, setTab] = useState('inventory');
+  const [tab, setTab] = useState(authSystemUser?.role === 'Production Staff' ? 'processing' : 'inventory');
   const [showUnitForm, setShowUnitForm] = useState(false);
   const [unitForm, setUnitForm] = useState(emptyUnitForm);
   const [unitSaved, setUnitSaved] = useState(false);

@@ -703,7 +703,7 @@ export default function Home() {
               {/* Role Selection Tabs */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-2">Select Portal Desk</label>
-                <div className="grid grid-cols-3 gap-1.5 bg-slate-100/70 border border-slate-200/50 p-1.5 rounded-xl text-[10px] font-bold">
+                <div className="grid grid-cols-4 gap-1.5 bg-slate-100/70 border border-slate-200/50 p-1.5 rounded-xl text-[10px] font-bold">
                   {[
                     { id: 'superadmin', label: 'Super Admin' },
                     { id: 'admin', label: 'Admin' },
@@ -734,6 +734,8 @@ export default function Home() {
                   <li>Super Admin: <code className="font-mono text-slate-700">superadmin@bloodlink.dvo</code></li>
                   <li>Admin: <code className="font-mono text-slate-700">admin@bloodlink.dvo</code></li>
                   <li>Registry Staff: <code className="font-mono text-slate-700">registry@bloodlink.dvo</code></li>
+                  <li>Serology Staff: <code className="font-mono text-slate-700">serology@bloodlink.dvo</code></li>
+                  <li>Production Staff: <code className="font-mono text-slate-700">production@bloodlink.dvo</code></li>
                   <li>Blood Bank Staff: <code className="font-mono text-slate-700">bloodbank@bloodlink.dvo</code></li>
                   <li>Issuance Personnel: <code className="font-mono text-slate-700">issuance@bloodlink.dvo</code></li>
                   <li>Hospital Desk: <code className="font-mono text-slate-700">hospital@bloodlink.dvo</code> (SPMC)</li>
