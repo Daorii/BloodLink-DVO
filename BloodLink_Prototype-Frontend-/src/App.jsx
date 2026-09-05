@@ -16,7 +16,7 @@ try {
   const raw = localStorage.getItem('bloodlink-dvo-store');
   if (raw) {
     const parsed = JSON.parse(raw);
-    if (!parsed?.version || parsed.version < 12) {
+    if (!parsed?.version || parsed.version < 13) {
       localStorage.removeItem('bloodlink-dvo-store');
     }
   }
