@@ -16,6 +16,21 @@ import davaoLogo from '../assets/bloodlinks_logo/davao-logo.png';
 
 const COMPONENTS = ['PRBC', 'Platelet Concentrate', 'FFP', 'Cryoprecipitate', 'Cryosupernate'];
 const BLOOD_TYPES = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
+const SAFETY_STATUSES = ['Cleared', 'Hold-Quarantined', 'NCU', 'NS', 'Discarded'];
+const INTENDED_USES = ['Transfusable', 'Storage-Research Only', 'Restricted'];
+
+const emptyUnitForm = {
+  unitId: '',
+  donationId: '',
+  bloodType: 'O+',
+  component: 'PRBC',
+  collectionDate: new Date().toISOString().slice(0, 10),
+  expirationDate: '',
+  quantity: '450',
+  safetyStatus: 'Cleared',
+  intendedUse: 'Transfusable',
+  inventoryStatus: 'Available'
+};
 
 const emptyForm = {
   urgency: 'routine',
@@ -52,6 +67,11 @@ export default function IssuanceDashboard() {
     fetchBloodIssuancesFromAPI,
     approveBloodRelease,
     bloodIssuances,
+    processBloodRequest,
+    bloodInventory,
+    recordBloodUnit,
+    donations,
+    donors,
     isSidebarCollapsed,
     toggleSidebar
   } = useBloodStore();
@@ -104,7 +124,20 @@ export default function IssuanceDashboard() {
   const [selectedHospitalId, setSelectedHospitalId] = useState('');
   const [queueFilter,        setQueueFilter]        = useState('all'); // 'all' | 'mine'
   const [successModal,       setSuccessModal]       = useState({ isOpen: false, title: '', message: '' });
-  const [drilldownHospital, setDrilldownHospital] = useState(null); // null = list view, object = detail view
+  const [drilldownHospital, setDrilldownHospital] = useState(null);
+  // Process request modal state
+  const [processingReq,   setProcessingReq]   = useState(null);
+  const [processItems,    setProcessItems]    = useState([]);
+  const [processRemarks,  setProcessRemarks]  = useState('');
+  const [isPartial,       setIsPartial]       = useState(false);
+  const [processing,      setProcessing]      = useState(false);
+  // Inventory add form state
+  const [showUnitForm,    setShowUnitForm]    = useState(false);
+  const [unitForm,        setUnitForm]        = useState({ ...emptyUnitForm });
+  const [unitSaved,       setUnitSaved]       = useState(false);
+  const [donationSearch,  setDonationSearch]  = useState('');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState('All');
+  const [reqSubTab,       setReqSubTab]       = useState('pending');
 
   // Forecast Records table — independent filters
   const [recHospital, setRecHospital] = useState('ALL');
@@ -120,6 +153,52 @@ export default function IssuanceDashboard() {
   const filteredQueue = isIssuanceStaff && queueFilter === 'mine'
     ? myRequests.filter(r => r.filedByIssuance === true)
     : myRequests;
+
+  // Inventory: commit blood unit
+  const handleUnitSubmit = (e) => {
+    e.preventDefault();
+    recordBloodUnit(unitForm);
+    setUnitSaved(true);
+    setTimeout(() => { setUnitSaved(false); setUnitForm({ ...emptyUnitForm }); setShowUnitForm(false); setDonationSearch(''); }, 2000);
+  };
+
+  // Process modal helpers
+  const availableUnits = (bloodType, component) =>
+    (bloodInventory || []).filter(u => u.bloodType === bloodType && u.component === component && u.inventoryStatus === 'Available').length;
+
+  const openProcess = (req) => {
+    setProcessingReq(req);
+    setProcessItems((req.items || []).map(i => ({
+      bloodType: i.bloodType,
+      component: i.component,
+      requested: i.units,
+      quantityIssued: i.units,
+    })));
+    setProcessRemarks('');
+    setIsPartial(false);
+  };
+
+  const handleProcess = async () => {
+    if (!processingReq) return;
+    setProcessing(true);
+    const result = await processBloodRequest({
+      requestId: processingReq.requestId,
+      items: processItems.map(i => ({ bloodType: i.bloodType, component: i.component, quantityIssued: i.quantityIssued })),
+      remarks: processRemarks,
+      isPartial,
+    });
+    setProcessing(false);
+    setProcessingReq(null);
+    if (result.success) {
+      setSuccessModal({
+        isOpen: true,
+        title: isPartial ? 'Partially Fulfilled!' : 'Blood Units Prepared!',
+        message: `Request ${processingReq.refNo} has been processed and is now Ready for Release.`,
+      });
+    } else {
+      alert('Failed to process request: ' + result.error);
+    }
+  };
 
   const handleVerify = (refNo) => {
     verifyRequest(refNo);
@@ -346,17 +425,32 @@ export default function IssuanceDashboard() {
               </button>
               {isIssuanceStaff && (
                 <>
-                  <button onClick={() => setActiveTab('inventory')}
+                  <button onClick={() => setActiveTab('issuance_requests')}
+                className={`w-full text-left nav-link ${activeTab === 'issuance_requests' ? 'active' : ''}`}
+                title={isSidebarCollapsed ? 'Issuance Requests' : ""}>
+                <Database className="nav-icon" />
+                <span className="sidebar-copy">Issuance Requests</span>
+                {verifiedCount > 0 && (
+                  <span className="nav-badge ml-auto bg-slate-700 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">{verifiedCount}</span>
+                )}
+              </button>
+              <button onClick={() => setActiveTab('inventory')}
                     className={`w-full text-left nav-link ${activeTab === 'inventory' ? 'active' : ''}`}
-                    title={isSidebarCollapsed ? 'Inventory Check' : ""}>
+                    title={isSidebarCollapsed ? 'Component Inventory' : ""}>
                     <Database className="nav-icon" />
-                    <span className="sidebar-copy">Inventory Check</span>
+                    <span className="sidebar-copy">Component Inventory</span>
                   </button>
                   <button onClick={() => setActiveTab('issuance_details')}
                     className={`w-full text-left nav-link ${activeTab === 'issuance_details' ? 'active' : ''}`}
-                    title={isSidebarCollapsed ? 'Blood Issuance Details' : ""}>
+                    title={isSidebarCollapsed ? 'Issuance Audit Log' : ""}>
                     <Activity className="nav-icon" />
-                    <span className="sidebar-copy">Blood Issuance Details</span>
+                    <span className="sidebar-copy">Issuance Audit Log</span>
+                  </button>
+                  <button onClick={() => setActiveTab('distribution')}
+                    className={`w-full text-left nav-link ${activeTab === 'distribution' ? 'active' : ''}`}
+                    title={isSidebarCollapsed ? 'Distribution Recommendation' : ""}>
+                    <Droplets className="nav-icon" />
+                    <span className="sidebar-copy">Distribution Reco.</span>
                   </button>
                   <button onClick={() => { setActiveTab('forecast'); if (!granularForecasts || granularForecasts.length === 0) generateGranularForecast(fcWeeks); }}
                     className={`w-full text-left nav-link ${activeTab === 'forecast' ? 'active' : ''}`}
@@ -385,10 +479,10 @@ export default function IssuanceDashboard() {
         <header className="sticky top-0 z-20 bg-white border-b border-slate-200 h-16 flex items-center justify-between px-8">
           <div>
             <h2 className="text-slate-900 font-bold text-sm leading-tight">
-              {isHospitalUser ? 'Blood Request Portal' : activeTab === 'inventory' ? 'Inventory Check' : activeTab === 'issuance_details' ? 'Blood Issuance Details' : activeTab === 'forecast' ? 'Demand Forecasting' : 'Issuance Queue'}
+              {isHospitalUser ? 'Blood Request Portal' : activeTab === 'inventory' ? 'Component Inventory' : activeTab === 'issuance_details' ? 'Issuance Audit Log' : activeTab === 'distribution' ? 'Distribution Recommendation' : activeTab === 'forecast' ? 'Demand Forecasting' : 'Issuance Requests'}
             </h2>
             <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5 tracking-wider">
-              {isHospitalUser ? 'Logistics-only - RA 10173 compliant' : activeTab === 'inventory' ? 'Current blood component stock' : activeTab === 'issuance_details' ? 'Detailed records of issued units' : activeTab === 'forecast' ? 'MLR-based blood demand predictions' : 'Review and fulfill hospital blood requests'}
+              {isHospitalUser ? 'Logistics-only - RA 10173 compliant' : activeTab === 'inventory' ? 'Blood component stock management' : activeTab === 'issuance_details' ? 'Full audit log of processed issuances' : activeTab === 'distribution' ? 'Equity-based blood distribution across hospital network' : activeTab === 'forecast' ? 'MLR-based blood demand predictions' : 'Verify, process, and release hospital blood requests'}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -559,7 +653,7 @@ export default function IssuanceDashboard() {
                               {/* Verify / Reject — pending hospital-submitted requests */}
                               {isIssuanceStaff && (req.status === 'Pending Verification' || req.status === 'Pending') && !req.filedByIssuance && (
                                 <>
-                                  <button onClick={() => handleVerify(req.refNo)} className="text-indigo-700 hover:bg-indigo-50 p-1.5 rounded-lg transition-colors font-bold flex items-center gap-0.5" title="Verify & Forward to Blood Bank">
+                                  <button onClick={() => handleVerify(req.refNo)} className="text-indigo-700 hover:bg-indigo-50 p-1.5 rounded-lg transition-colors font-bold flex items-center gap-0.5" title="Verify">
                                     <CheckCircle className="w-4 h-4 text-indigo-600" /> <span className="text-[10px]">Verify</span>
                                   </button>
                                   <button onClick={() => openReject(req)} className="text-[#C21C24] hover:bg-rose-50 p-1.5 rounded-lg transition-colors" title="Reject">
@@ -567,7 +661,14 @@ export default function IssuanceDashboard() {
                                   </button>
                                 </>
                               )}
-                              {/* Approve Release — once Blood Bank has prepared the units */}
+                              {/* Process — after verified, issuance prepares blood units */}
+                              {isIssuanceStaff && req.status === 'Verified' && (
+                                <button onClick={() => openProcess(req)}
+                                  className="text-slate-900 hover:bg-slate-100 p-1.5 rounded-lg transition-colors font-bold flex items-center gap-0.5" title="Process Request">
+                                  <Database className="w-4 h-4 text-slate-700" /> <span className="text-[10px]">Process</span>
+                                </button>
+                              )}
+                              {/* Approve Release — once units are prepared */}
                               {isIssuanceStaff && (req.status === 'Ready for Release' || req.status === 'Partially Fulfilled') && (
                                 <button onClick={() => handleApproveRelease(req)}
                                   className="text-emerald-700 hover:bg-emerald-50 p-1.5 rounded-lg transition-colors font-bold flex items-center gap-0.5" title="Approve Physical Release">
@@ -575,10 +676,9 @@ export default function IssuanceDashboard() {
                                 </button>
                               )}
                               {/* Status labels for non-actionable states */}
-                              {isIssuanceStaff && !['Pending Verification', 'Pending', 'Ready for Release', 'Partially Fulfilled'].includes(req.status) && (
+                              {isIssuanceStaff && !['Pending Verification', 'Pending', 'Verified', 'Ready for Release', 'Partially Fulfilled'].includes(req.status) && (
                                 <span className="text-slate-400 text-[10px] font-semibold">
-                                  {req.status === 'Verified' ? 'With Blood Bank' :
-                                   req.status === 'Released' ? '✓ Released' :
+                                  {req.status === 'Released' ? '✓ Released' :
                                    req.status === 'Rejected' ? '✗ Rejected' : req.status}
                                 </span>
                               )}
@@ -602,45 +702,357 @@ export default function IssuanceDashboard() {
           )}
 
           {isIssuanceStaff && activeTab === 'inventory' && (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
-                <Database className="w-4 h-4 text-[#C21C24]" />
-                <h3 className="text-slate-900 font-bold text-xs uppercase tracking-wider">Current Blood Component Stock</h3>
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Current Blood Stock</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Real-time status of PRBC, Platelets, FFP, Cryoprecipitate and Cryosupernate.</p>
+                </div>
+                <button onClick={() => setShowUnitForm(true)}
+                  className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition-colors cursor-pointer">
+                  <Plus className="w-3.5 h-3.5" /> Record Blood Unit
+                </button>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs font-semibold">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
-                      <th className="px-6 py-3 font-bold">Blood Type</th>
-                      <th className="px-6 py-3 font-bold text-center">PRBC</th>
-                      <th className="px-6 py-3 font-bold text-center">Platelets</th>
-                      <th className="px-6 py-3 font-bold text-center">FFP</th>
-                      <th className="px-6 py-3 font-bold text-center">Cryo</th>
-                      <th className="px-6 py-3 font-bold text-center">CryoSup</th>
-                      <th className="px-6 py-3 font-bold text-center">Level</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {inventory.map(item => (
-                      <tr key={item.type} className="hover:bg-slate-50/50">
-                        <td className="px-6 py-3"><span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-rose-50 text-[#C21C24] font-black border border-rose-100 text-[10px] font-mono">{item.type}</span></td>
-                        <td className="px-6 py-3 text-center font-bold text-slate-800">{item.units}</td>
-                        <td className="px-6 py-3 text-center text-slate-600">{item.platelets || 0}</td>
-                        <td className="px-6 py-3 text-center text-slate-600">{item.ffp || 0}</td>
-                        <td className="px-6 py-3 text-center text-slate-600">{item.cryo || 0}</td>
-                        <td className="px-6 py-3 text-center text-slate-600">{item.cryosup || 0}</td>
-                        <td className="px-6 py-3 text-center">
-                          {item.status === 'safe'     && <span className="bg-emerald-50 border border-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" />Safe</span>}
-                          {item.status === 'low'      && <span className="bg-amber-50 border border-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase inline-flex items-center gap-1"><Activity className="w-3 h-3" />Low</span>}
-                          {item.status === 'critical' && <span className="bg-rose-50 border border-rose-100 text-[#C21C24] px-2 py-0.5 rounded text-[10px] font-bold uppercase inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" />Critical</span>}
-                        </td>
+
+              {/* Stock summary table — click row to filter bag registry */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs font-semibold text-slate-655">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
+                        <th className="px-6 py-3 font-bold">Blood Type</th>
+                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">PRBC (Units)</th>
+                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">Platelets</th>
+                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">FFP</th>
+                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">Cryoprecipitate</th>
+                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">Cryosupernate</th>
+                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">PRBC Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {inventory.map((item) => {
+                        const isSelected = selectedTypeFilter === item.type;
+                        return (
+                          <tr key={item.type}
+                            onClick={() => setSelectedTypeFilter(isSelected ? 'All' : item.type)}
+                            className={`cursor-pointer transition-all ${isSelected ? 'bg-rose-50/80 font-bold border-l-4 border-[#C21C24]' : 'hover:bg-slate-50/70'}`}
+                            title={`Click to filter bag registry for ${item.type}`}>
+                            <td className="px-6 py-3.5 flex items-center gap-2">
+                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-bold border text-[10px] font-mono shadow-2xs ${
+                                isSelected ? 'bg-[#C21C24] text-white border-[#C21C24]' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                                {item.type}
+                              </span>
+                              {isSelected && <span className="text-[9px] bg-rose-100 text-rose-800 font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider">Filtering</span>}
+                            </td>
+                            <td className="px-6 py-3.5 text-center border-l border-slate-100 font-bold text-sm text-slate-800">{item.units}</td>
+                            <td className="px-6 py-3.5 text-center border-l border-slate-100 font-bold text-slate-600">{item.platelets || 0}</td>
+                            <td className="px-6 py-3.5 text-center border-l border-slate-100 font-bold text-slate-600">{item.ffp || 0}</td>
+                            <td className="px-6 py-3.5 text-center border-l border-slate-100 font-bold text-slate-600">{item.cryo || 0}</td>
+                            <td className="px-6 py-3.5 text-center border-l border-slate-100 font-bold text-slate-600">{item.cryosup || 0}</td>
+                            <td className="px-6 py-3.5 text-center border-l border-slate-100">
+                              {item.status === 'safe' && <span className="bg-emerald-50 border border-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Safe</span>}
+                              {item.status === 'low' && <span className="bg-amber-50 border border-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><Activity className="w-3 h-3" /> Low</span>}
+                              {item.status === 'critical' && <span className="bg-rose-50 border border-rose-100 text-[#C21C24] px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Critical</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
+
+              {/* Physical Blood Bag Registry */}
+              {(() => {
+                const filteredInventory = (bloodInventory || []).filter(unit =>
+                  selectedTypeFilter === 'All' ? true : unit.bloodTypeId === selectedTypeFilter
+                );
+                return (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden space-y-4">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-slate-900 flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+                          <Database className="w-4 h-4 text-indigo-600" /> Physical Blood Bag Registry
+                        </h3>
+                        {selectedTypeFilter !== 'All' && (
+                          <span className="text-[10px] bg-rose-50 border border-rose-200 text-rose-700 font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                            Filtered by {selectedTypeFilter}
+                            <button onClick={() => setSelectedTypeFilter('All')} className="hover:text-rose-900 font-extrabold ml-1 cursor-pointer" title="Clear filter">✕</button>
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-slate-400 font-bold mr-1">Filter:</span>
+                        {['All', ...BLOOD_TYPES].map(type => (
+                          <button key={type} onClick={() => setSelectedTypeFilter(type)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono transition-colors cursor-pointer ${
+                              selectedTypeFilter === type ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                            {type}
+                          </button>
+                        ))}
+                        <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded ml-2">Total: {filteredInventory.length} bags</span>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs font-semibold text-slate-650">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
+                            <th className="px-5 py-3 font-bold">Unit ID</th>
+                            <th className="px-5 py-3 font-bold">Donation ID</th>
+                            <th className="px-5 py-3 font-bold text-center">Type</th>
+                            <th className="px-5 py-3 font-bold">Component</th>
+                            <th className="px-5 py-3 font-bold text-center">Collected</th>
+                            <th className="px-5 py-3 font-bold text-center">Expiry</th>
+                            <th className="px-5 py-3 font-bold text-center">Qty (mL)</th>
+                            <th className="px-5 py-3 font-bold text-center">Safety</th>
+                            <th className="px-5 py-3 font-bold">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-normal">
+                          {filteredInventory.map(unit => (
+                            <tr key={unit.unitId} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-5 py-3 font-mono font-bold text-slate-900">
+                                <span className="bg-indigo-50 text-indigo-950 border border-indigo-100 px-2 py-0.5 rounded text-[11px] font-mono">{unit.unitId}</span>
+                              </td>
+                              <td className="px-5 py-3 font-mono text-slate-400 text-[10px]">{unit.donationId}</td>
+                              <td className="px-5 py-3 text-center">
+                                <span className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded text-[10px] font-mono">{unit.bloodTypeId}</span>
+                              </td>
+                              <td className="px-5 py-3 font-bold text-slate-700">{unit.componentId}</td>
+                              <td className="px-5 py-3 text-center font-mono text-[10px]">{unit.collectionDate || '—'}</td>
+                              <td className="px-5 py-3 text-center font-mono text-[10px]">{unit.expirationDate}</td>
+                              <td className="px-5 py-3 text-center font-bold text-slate-800">{unit.quantity} mL</td>
+                              <td className="px-5 py-3 text-center">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  unit.safetyStatus === 'Cleared' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
+                                  unit.safetyStatus === 'Hold-Quarantined' ? 'bg-amber-50 text-amber-700 border border-amber-100' :
+                                  'bg-rose-50 text-rose-700 border border-rose-100'}`}>
+                                  {unit.safetyStatus}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  unit.inventoryStatus === 'Available' ? 'bg-blue-50 text-blue-700 border border-blue-100' :
+                                  unit.inventoryStatus === 'Issued' ? 'bg-slate-100 text-slate-600' :
+                                  'bg-rose-50 text-rose-700 border border-rose-100'}`}>
+                                  {unit.inventoryStatus}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                          {filteredInventory.length === 0 && (
+                            <tr><td colSpan={9} className="px-5 py-8 text-center text-slate-400 text-xs font-normal">No blood bags found{selectedTypeFilter !== 'All' ? ` for type ${selectedTypeFilter}` : ''}.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
+
+          {/* ── TAB: ISSUANCE REQUESTS ── */}
+          {isIssuanceStaff && activeTab === 'issuance_requests' && (() => {
+            const verifiedReqs = bloodRequests.filter(r => r.status === 'Verified');
+            const readyReqs    = bloodRequests.filter(r => r.status === 'Ready for Release' || r.status === 'Partially Fulfilled');
+            const historyReqs  = bloodRequests.filter(r => r.status === 'Released' || r.status === 'Rejected');
+            return (
+              <div className="space-y-5 animate-in fade-in duration-200">
+                {/* Sub-tab bar */}
+                <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+                  {[
+                    { key: 'pending', label: `To Process (${verifiedReqs.length})` },
+                    { key: 'ready',   label: `Ready for Release (${readyReqs.length})` },
+                    { key: 'history', label: 'History' },
+                  ].map(t => (
+                    <button key={t.key} onClick={() => setReqSubTab(t.key)}
+                      className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        reqSubTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* PENDING — Verified requests to process */}
+                {reqSubTab === 'pending' && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                      <h3 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-amber-500" /> Verified Requests — Ready to Process
+                      </h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs font-semibold text-slate-650">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
+                            <th className="px-6 py-3">Ref / Hospital</th>
+                            <th className="px-6 py-3">Urgency</th>
+                            <th className="px-6 py-3">Items Requested</th>
+                            <th className="px-6 py-3">Date Needed</th>
+                            <th className="px-6 py-3">Personnel</th>
+                            <th className="px-6 py-3 text-center">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {verifiedReqs.map(req => (
+                            <tr key={req.refNo} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-6 py-3.5">
+                                <p className="font-mono text-[10px] font-bold text-slate-400">{req.refNo}</p>
+                                <p className="font-bold text-slate-900 mt-0.5">{req.hospital}</p>
+                                <p className="text-[10px] text-slate-400 font-normal">{req.submittedAt}</p>
+                              </td>
+                              <td className="px-6 py-3.5">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                  req.urgency === 'emergency' ? 'bg-red-100 text-red-700' :
+                                  req.urgency === 'urgent' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                                  {req.urgency || 'routine'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-3.5">
+                                <div className="space-y-0.5">
+                                  {(req.items || []).map((item, i) => {
+                                    const avail = availableUnits(item.bloodType, item.component);
+                                    const sufficient = avail >= item.units;
+                                    return (
+                                      <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                                        <span className="font-mono font-bold text-slate-700">{item.bloodType}</span>
+                                        <span className="text-slate-400">·</span>
+                                        <span className="text-slate-600">{item.component}</span>
+                                        <span className="text-slate-400">×{item.units}</span>
+                                        <span className={`ml-1 font-bold ${sufficient ? 'text-emerald-600' : avail > 0 ? 'text-amber-600' : 'text-red-600'}`}>
+                                          ({sufficient ? '✓' : avail > 0 ? '⚠' : '✗'} {avail} avail)
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </td>
+                              <td className="px-6 py-3.5 font-semibold text-slate-700">{req.dateNeeded || '—'}</td>
+                              <td className="px-6 py-3.5 font-normal">
+                                <p className="font-semibold text-slate-800">{req.requestingPersonnel || req.contactPerson || '—'}</p>
+                                <p className="text-[10px] text-slate-400">{req.ward || ''}</p>
+                              </td>
+                              <td className="px-6 py-3.5">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button onClick={() => openProcess(req)}
+                                    className="bg-slate-900 hover:bg-slate-700 text-white px-2.5 py-1.5 rounded-lg font-bold transition-colors shadow-sm flex items-center gap-1 cursor-pointer text-[11px]">
+                                    <CheckCircle className="w-3.5 h-3.5" /> Process
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                          {verifiedReqs.length === 0 && (
+                            <tr><td colSpan={6} className="px-6 py-10 text-center text-slate-400 font-normal text-xs">No verified requests to process yet.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* READY FOR RELEASE */}
+                {reqSubTab === 'ready' && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-blue-50/50">
+                      <h3 className="font-bold text-xs uppercase tracking-wider text-blue-600 flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4" /> Ready for Release — Approve Physical Dispatch
+                      </h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs font-semibold">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
+                            <th className="px-6 py-3">Ref / Hospital</th>
+                            <th className="px-6 py-3">Items to Release</th>
+                            <th className="px-6 py-3">Status</th>
+                            <th className="px-6 py-3 text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {readyReqs.map(req => (
+                            <tr key={req.refNo} className="hover:bg-slate-50/50">
+                              <td className="px-6 py-3.5">
+                                <p className="font-mono text-[10px] font-bold text-slate-400">{req.refNo}</p>
+                                <p className="font-bold text-slate-900">{req.hospital}</p>
+                              </td>
+                              <td className="px-6 py-3.5">
+                                <div className="space-y-0.5">
+                                  {(req.items || []).map((item, i) => (
+                                    <div key={i} className="text-[10px] text-slate-600">
+                                      <span className="font-mono font-bold text-slate-700">{item.bloodType}</span> · {item.component} ×{item.units}
+                                    </div>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="px-6 py-3.5">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  req.status === 'Partially Fulfilled' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                                  {req.status}
+                                </span>
+                              </td>
+                              <td className="px-6 py-3.5 text-center">
+                                <button onClick={() => handleApproveRelease(req)}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded-lg font-bold transition-colors shadow-sm flex items-center gap-1 mx-auto cursor-pointer text-[11px]">
+                                  <CheckCircle className="w-3.5 h-3.5" /> Approve Release
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                          {readyReqs.length === 0 && (
+                            <tr><td colSpan={4} className="px-6 py-10 text-center text-slate-400 font-normal text-xs">No requests awaiting release approval.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* HISTORY */}
+                {reqSubTab === 'history' && (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                      <h3 className="font-bold text-xs uppercase tracking-wider text-slate-500">Completed Request History</h3>
+                    </div>
+                    <table className="w-full text-left border-collapse text-xs font-semibold">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
+                          <th className="px-6 py-3">Ref</th>
+                          <th className="px-6 py-3">Hospital</th>
+                          <th className="px-6 py-3">Items</th>
+                          <th className="px-6 py-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {historyReqs.map(req => (
+                          <tr key={req.refNo}>
+                            <td className="px-6 py-3.5 font-mono text-[10px] font-bold text-slate-400">{req.refNo}</td>
+                            <td className="px-6 py-3.5 font-bold text-slate-900">{req.hospital}</td>
+                            <td className="px-6 py-3.5">
+                              {(req.items || []).map((it, i) => (
+                                <span key={i} className="text-[10px] text-slate-500 mr-2">{it.bloodType} · {it.component} ×{it.units}</span>
+                              ))}
+                            </td>
+                            <td className="px-6 py-3.5">
+                              {req.status === 'Released'
+                                ? <span className="text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Released</span>
+                                : <span className="text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1"><XCircle className="w-3 h-3" /> Rejected</span>
+                              }
+                            </td>
+                          </tr>
+                        ))}
+                        {historyReqs.length === 0 && (
+                          <tr><td colSpan={4} className="px-6 py-10 text-center text-slate-400 text-xs">No history yet.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
 
           {isIssuanceStaff && activeTab === 'issuance_details' && (
             <div className="space-y-5 animate-in fade-in duration-200">
@@ -716,6 +1128,48 @@ export default function IssuanceDashboard() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB: DISTRIBUTION RECOMMENDATION ── */}
+          {isIssuanceStaff && activeTab === 'distribution' && (
+            <div className="space-y-5 animate-in fade-in duration-200">
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
+                <Activity className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-blue-800">
+                  <p className="font-bold mb-0.5">Equity-Based Blood Distribution Algorithm</p>
+                  <p className="text-blue-700">Allocations are computed proportionally based on hospital type weighting (Government 1.5×, Blood Bank 1.2×, Private 1.0×) and predicted demand week. Only units above safety threshold are recommended for release.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {inventory.map(item => (
+                  <div key={item.type} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded text-sm font-mono">{item.type}</span>
+                        <span className={`text-[10px] font-bold uppercase ${item.status === 'critical' ? 'text-rose-600' : item.status === 'low' ? 'text-amber-600' : 'text-emerald-600'}`}>
+                          {item.status === 'critical' ? '⚠ Critical Stock' : item.status === 'low' ? '↓ Low Stock' : '✓ Stable'}
+                        </span>
+                      </div>
+                      <span className="text-xs font-mono font-bold text-slate-700">Stock: {item.units} units</span>
+                    </div>
+                    <div className="space-y-2 text-xs">
+                      <div className="flex justify-between text-slate-500 font-semibold">
+                        <span>SPMC (Government)</span>
+                        <span className="font-mono text-slate-900 font-bold">{Math.round(item.units * 0.5)} units (50%)</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500 font-semibold">
+                        <span>Red Cross (Blood Bank)</span>
+                        <span className="font-mono text-slate-900 font-bold">{Math.round(item.units * 0.3)} units (30%)</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500 font-semibold">
+                        <span>DMSF Hospital (Private)</span>
+                        <span className="font-mono text-slate-900 font-bold">{Math.round(item.units * 0.2)} units (20%)</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -1596,6 +2050,155 @@ export default function IssuanceDashboard() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── PROCESS REQUEST MODAL ─── */}
+      {processingReq && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white rounded-t-2xl flex-shrink-0">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Issuance Personnel · Process Request</p>
+              <div className="flex items-center justify-between mt-0.5">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-slate-700" />
+                  <h3 className="font-bold text-slate-900 text-sm">{processingReq.refNo} — {processingReq.hospital}</h3>
+                </div>
+                <button onClick={() => setProcessingReq(null)} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto flex-1">
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Adjust quantities to issue per item:</p>
+              {processItems.map((item, idx) => {
+                const avail = availableUnits(item.bloodType, item.component);
+                return (
+                  <div key={idx} className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-lg px-4 py-3">
+                    <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-rose-50 text-[#C21C24] font-black text-[10px] border border-rose-100 font-mono flex-shrink-0">{item.bloodType}</span>
+                    <div className="flex-1">
+                      <p className="text-xs font-bold text-slate-800">{item.component}</p>
+                      <p className="text-[10px] text-slate-400">Requested: {item.requested} · Available: <span className={avail >= item.requested ? 'text-emerald-600 font-bold' : 'text-amber-600 font-bold'}>{avail}</span></p>
+                    </div>
+                    <input type="number" min={0} max={item.requested} value={item.quantityIssued}
+                      onChange={e => {
+                        const val = parseInt(e.target.value) || 0;
+                        setProcessItems(prev => prev.map((p, i) => i === idx ? { ...p, quantityIssued: val } : p));
+                        setIsPartial(processItems.some((p, i) => i === idx ? val < p.requested : p.quantityIssued < p.requested));
+                      }}
+                      className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-center focus:ring-2 focus:ring-slate-900 outline-none" />
+                  </div>
+                );
+              })}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Remarks (optional)</label>
+                <textarea value={processRemarks} onChange={e => setProcessRemarks(e.target.value)} rows={2}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none resize-none"
+                  placeholder="Notes for this issuance..." />
+              </div>
+              {isPartial && (
+                <div className="bg-amber-50 border border-amber-100 rounded-lg px-4 py-2 text-xs text-amber-700 font-semibold flex items-center gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" /> Some quantities are below requested — this will be marked as Partially Fulfilled.
+                </div>
+              )}
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setProcessingReq(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+                <button onClick={handleProcess} disabled={processing}
+                  className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-full shadow-sm transition-colors flex items-center gap-1.5 disabled:opacity-60">
+                  <CheckCircle className="w-3.5 h-3.5" /> {processing ? 'Processing…' : 'Confirm Issuance'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── ADD BLOOD UNIT MODAL ─── */}
+      {showUnitForm && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white rounded-t-2xl flex-shrink-0">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Issuance Personnel · Component Inventory</p>
+              <div className="flex items-center justify-between mt-0.5">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-indigo-600" />
+                  <h3 className="font-bold text-slate-900 text-sm">Add Blood Unit</h3>
+                </div>
+                <button onClick={() => { setShowUnitForm(false); setDonationSearch(''); }} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <form onSubmit={handleUnitSubmit} className="p-6 space-y-4 overflow-y-auto flex-1">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Physical Bag Serial / Barcode (optional)</label>
+                <input type="text" placeholder="e.g. BAG-DVO-2026-001 (auto-generated if blank)"
+                  value={unitForm.unitId} onChange={e => setUnitForm({ ...unitForm, unitId: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none font-mono bg-slate-50/50" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Blood Type <span className="text-rose-500">*</span></label>
+                  <select required value={unitForm.bloodType} onChange={e => setUnitForm({ ...unitForm, bloodType: e.target.value })}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none bg-white">
+                    {BLOOD_TYPES.map(v => <option key={v}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Component <span className="text-rose-500">*</span></label>
+                  <select required value={unitForm.component} onChange={e => setUnitForm({ ...unitForm, component: e.target.value })}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none bg-white">
+                    {COMPONENTS.map(v => <option key={v}>{v}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Collection Date <span className="text-rose-500">*</span></label>
+                  <input type="date" required value={unitForm.collectionDate} onChange={e => setUnitForm({ ...unitForm, collectionDate: e.target.value })}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Expiration Date <span className="text-rose-500">*</span></label>
+                  <input type="date" required value={unitForm.expirationDate} onChange={e => setUnitForm({ ...unitForm, expirationDate: e.target.value })}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Quantity / Volume (mL) <span className="text-rose-500">*</span></label>
+                <input type="number" required min="1" step="0.01" value={unitForm.quantity} onChange={e => setUnitForm({ ...unitForm, quantity: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none" placeholder="e.g. 450" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Safety Status <span className="text-rose-500">*</span></label>
+                  <select required value={unitForm.safetyStatus} onChange={e => setUnitForm({ ...unitForm, safetyStatus: e.target.value })}
+                    className={`w-full border rounded-lg px-3 py-2 text-xs outline-none ${unitForm.safetyStatus !== 'Cleared' ? 'border-amber-200 bg-amber-50 text-amber-700 font-bold' : 'border-slate-200 bg-white focus:ring-2 focus:ring-slate-900'}`}>
+                    {SAFETY_STATUSES.map(v => <option key={v}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Intended Use <span className="text-rose-500">*</span></label>
+                  <select required value={unitForm.intendedUse} onChange={e => setUnitForm({ ...unitForm, intendedUse: e.target.value })}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none bg-white">
+                    {INTENDED_USES.map(v => <option key={v}>{v}</option>)}
+                  </select>
+                </div>
+              </div>
+              {unitSaved && (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-lg p-3 flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4" /> Unit recorded successfully! Inventory updated.
+                </div>
+              )}
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowUnitForm(false)} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+                <button type="submit" className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-full shadow-sm transition-colors flex items-center gap-1.5">
+                  <Database className="w-3.5 h-3.5" /> Commit Unit
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
