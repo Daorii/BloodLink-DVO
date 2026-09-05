@@ -1906,7 +1906,7 @@ export const useBloodStore = create(
     }),
     {
       name: 'bloodlink-dvo-store',
-      version: 10,
+      version: 12,
       migrate: () => {
         return undefined;
       }
