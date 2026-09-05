@@ -467,6 +467,10 @@ export default function Home() {
       setEmail('admin@bloodlink.dvo');
     } else if (role === 'registry') {
       setEmail('registry@bloodlink.dvo');
+    } else if (role === 'serology') {
+      setEmail('serology@bloodlink.dvo');
+    } else if (role === 'production') {
+      setEmail('production@bloodlink.dvo');
     } else if (role === 'bloodbank') {
       setEmail('bloodbank@bloodlink.dvo');
     } else if (role === 'issuance') {
@@ -490,14 +494,17 @@ export default function Home() {
     }
 
     setShowModal(false);
-    if (authenticatedUser.role === 'Super Admin' || authenticatedUser.role === 'Administrator') {
+    const r = authenticatedUser.role;
+    if (r === 'Super Admin' || r === 'Administrator') {
       navigate('/admin/dashboard');
-    } else if (authenticatedUser.role === 'Registry Staff') {
+    } else if (r === 'Registry Staff' || r === 'Serology Staff') {
       navigate('/registry/dashboard');
-    } else if (authenticatedUser.role === 'Blood Bank Staff') {
+    } else if (r === 'Blood Bank Staff' || r === 'Production Staff') {
       navigate('/bloodbank/dashboard');
-    } else if (authenticatedUser.role === 'Issuance Personnel' || authenticatedUser.role === 'Hospital User') {
+    } else if (r === 'Issuance Personnel' || r === 'Hospital User') {
       navigate('/issuance/dashboard');
+    } else {
+      navigate('/admin/dashboard');
     }
   };
 
