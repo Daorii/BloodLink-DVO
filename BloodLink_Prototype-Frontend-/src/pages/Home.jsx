@@ -6,7 +6,7 @@ import HowItWorks from '../components/HowItWorks';
 import {
   Zap, Bell, ArrowRight, Activity, MapPin, Database,
   X, Phone, Clock, ChevronDown, LogIn, User,
-  Shield, Search, MessageSquare, FileText, AlertTriangle
+  Shield, Search, MessageSquare, FileText, AlertTriangle, Eye, EyeOff
 } from 'lucide-react';
 
 // ── Logos ──
