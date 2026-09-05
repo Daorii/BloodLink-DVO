@@ -454,6 +454,7 @@ export default function Home() {
   const [email, setEmail] = useState('admin@bloodlink.dvo');
   const [password, setPassword] = useState('pass123');
   const [loginError, setLoginError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const loginSystemUser = useBloodStore((state) => state.loginSystemUser);
 
@@ -461,6 +462,7 @@ export default function Home() {
   const handleRoleChange = (role) => {
     setLoginRole(role);
     setLoginError('');
+    setPassword('pass123');
     if (role === 'superadmin') {
       setEmail('superadmin@bloodlink.dvo');
     } else if (role === 'admin') {
