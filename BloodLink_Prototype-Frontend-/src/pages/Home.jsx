@@ -710,7 +710,9 @@ export default function Home() {
                     { id: 'registry', label: 'Registry' },
                     { id: 'bloodbank', label: 'Blood Bank' },
                     { id: 'issuance', label: 'Issuance' },
-                    { id: 'hospital', label: 'Hospital' }
+                    { id: 'hospital', label: 'Hospital' },
+                    { id: 'production', label: 'Production' },
+                    { id: 'serology', label: 'Serology' }
                   ].map(r => (
                     <button
                       key={r.id}
@@ -758,13 +760,23 @@ export default function Home() {
               {/* Password */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-slate-400 outline-none transition-all"
-                  placeholder="pass123"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full border border-slate-200 rounded-lg p-2.5 pr-10 text-sm focus:ring-2 focus:ring-slate-400 outline-none transition-all"
+                    placeholder="pass123"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition-colors p-1 cursor-pointer"
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
               {/* Submit Button */}
