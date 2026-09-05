@@ -151,6 +151,51 @@ const initialUsers = [
   { id: 'USR-006', name: 'Dr. Roberto Santos', role: 'Hospital User', email: 'hospital@bloodlink.dvo', status: 'Active', hospitalId: 'HOSP-001' }
 ];
 
+const initialComponentProcessingLogs = [
+  {
+    processingId: 'PROC-001',
+    unitRef: 'WB-2026-9041',
+    donorName: 'Juan Dela Cruz',
+    bloodType: 'O+',
+    sourceVolume: 450,
+    componentType: 'PRBC',
+    yieldVolume: 280,
+    processingMethod: 'Heavy Spin 4000 RPM x 10m @ 4�C',
+    processedBy: 'Engr. Marco Reyes (RMT)',
+    processedAt: '2026-09-01 10:30 AM',
+    expiryDate: '2026-10-06',
+    status: 'Completed'
+  },
+  {
+    processingId: 'PROC-002',
+    unitRef: 'WB-2026-9042',
+    donorName: 'Maria Clara',
+    bloodType: 'A+',
+    sourceVolume: 450,
+    componentType: 'Platelet Concentrate',
+    yieldVolume: 65,
+    processingMethod: 'Light Spin 2000 RPM x 5m @ 22�C',
+    processedBy: 'Engr. Marco Reyes (RMT)',
+    processedAt: '2026-09-02 02:15 PM',
+    expiryDate: '2026-09-07',
+    status: 'Completed'
+  },
+  {
+    processingId: 'PROC-003',
+    unitRef: 'WB-2026-9043',
+    donorName: 'Andres Bonifacio',
+    bloodType: 'B-',
+    sourceVolume: 450,
+    componentType: 'FFP',
+    yieldVolume: 220,
+    processingMethod: 'Rapid Freeze @ -30�C',
+    processedBy: 'Engr. Marco Reyes (RMT)',
+    processedAt: '2026-09-03 11:00 AM',
+    expiryDate: '2027-09-03',
+    status: 'Completed'
+  }
+];
+
 const initialDonationEvents = [
   { eventId: 'EVT-001', province: 'Davao del Sur', cityMunicipality: 'Davao City', barangayOrganization: 'Buhangin Gym', eventDate: '2026-03-10' },
   { eventId: 'EVT-002', province: 'Davao del Sur', cityMunicipality: 'Davao City', barangayOrganization: 'Matina Center', eventDate: '2026-06-15' }
