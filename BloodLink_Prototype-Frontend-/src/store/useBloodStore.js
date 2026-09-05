@@ -526,6 +526,7 @@ export const useBloodStore = create(
       bloodIssuanceDetails: [],
       bloodIssuances: [], // DB-backed issuances
       inventory: initialInventory,
+      componentProcessingLogs: initialComponentProcessingLogs,
       bloodRequests: initialRequests,
       hospitals: initialHospitals,
       users: initialUsers,
@@ -1306,7 +1307,7 @@ export const useBloodStore = create(
 
       updateUser: async (userId, updatedFields) => {
         const now = new Date();
-        const roleMap = { 'Super Admin': 'ROLE-001', 'Administrator': 'ROLE-002', 'Registry Staff': 'ROLE-003', 'Blood Bank Staff': 'ROLE-004', 'Issuance Personnel': 'ROLE-005', 'Hospital User': 'ROLE-006' };
+        const roleMap = { 'Super Admin': 'ROLE-001', 'Administrator': 'ROLE-002', 'Registry Staff': 'ROLE-003', 'Blood Bank Staff': 'ROLE-004', 'Issuance Personnel': 'ROLE-005', 'Hospital User': 'ROLE-006', 'Serology Staff': 'ROLE-007', 'Production Staff': 'ROLE-008' };
 
         // ── Try API first ──
         const numericId = parseInt(userId.replace('USR-', ''), 10);
@@ -1841,6 +1842,62 @@ export const useBloodStore = create(
           console.error('dispatchBulkRecallSMS error:', e);
           throw e;
         }
+      },
+
+      
+      processComponentUnit: (data) => {
+        const now = new Date();
+        const processingId = 'PROC-' + Math.floor(1000 + Math.random() * 9000);
+        
+        let daysToAdd = 35;
+        if (data.componentType === 'Platelet Concentrate') daysToAdd = 5;
+        else if (data.componentType === 'FFP' || data.componentType === 'Cryoprecipitate' || data.componentType === 'Cryosupernate') daysToAdd = 365;
+
+        const expDateObj = new Date();
+        expDateObj.setDate(expDateObj.getDate() + daysToAdd);
+        const expiryDate = expDateObj.toISOString().split('T')[0];
+
+        const newLog = {
+          processingId,
+          unitRef: data.unitRef || ('WB-2026-' + Math.floor(1000 + Math.random() * 9000)),
+          donorName: data.donorName || 'Anonymous Donor',
+          bloodType: data.bloodType || 'O+',
+          sourceVolume: parseInt(data.sourceVolume || 450, 10),
+          componentType: data.componentType || 'PRBC',
+          yieldVolume: parseInt(data.yieldVolume || 280, 10),
+          processingMethod: data.processingMethod || 'Standard Centrifugation',
+          processedBy: data.processedBy || 'Production Staff',
+          processedAt: now.toLocaleString(),
+          expiryDate,
+          status: 'Completed'
+        };
+
+        const updatedInventory = (get().inventory || []).map(item => {
+          if (item.type === newLog.bloodType) {
+            return { ...item, units: item.units + 1 };
+          }
+          return item;
+        });
+
+        const auditLogId = 'LOG-' + Math.floor(100 + Math.random() * 900);
+        const newAuditLog = {
+          logId: auditLogId,
+          userId: get().authSystemUser?.id || 'USR-008',
+          action: "Production Staff processed " + newLog.sourceVolume + "mL Whole Blood into " + newLog.componentType + " (" + newLog.yieldVolume + "mL) for type " + newLog.bloodType,
+          module: 'Production Component Processing',
+          recordId: processingId,
+          oldValue: null,
+          newValue: JSON.stringify(newLog),
+          performedAt: now.toLocaleString()
+        };
+
+        set(state => ({
+          componentProcessingLogs: [newLog, ...(state.componentProcessingLogs || [])],
+          inventory: updatedInventory,
+          auditLogs: [newAuditLog, ...(state.auditLogs || [])]
+        }));
+
+        return newLog;
       },
 
       resetMobilization: () => {

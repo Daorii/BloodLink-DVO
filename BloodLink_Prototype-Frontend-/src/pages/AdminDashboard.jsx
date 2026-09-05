@@ -1377,6 +1377,8 @@ export default function AdminDashboard() {
                           { label: 'Registry', role: 'Registry Staff', roleId: 'ROLE-003' },
                           { label: 'Blood Bank', role: 'Blood Bank Staff', roleId: 'ROLE-004' },
                           { label: 'Issuance', role: 'Issuance Personnel', roleId: 'ROLE-005' },
+                          { label: 'Serology', role: 'Serology Staff', roleId: 'ROLE-007' },
+                          { label: 'Production', role: 'Production Staff', roleId: 'ROLE-008' },
                           { label: 'Hospital', role: 'Hospital User', roleId: 'ROLE-006' },
                           { label: 'Admin', role: 'Administrator', roleId: 'ROLE-002' },
                           ...(isSuperAdmin ? [{ label: 'Super Admin', role: 'Super Admin', roleId: 'ROLE-001' }] : [])
@@ -3573,7 +3575,7 @@ export default function AdminDashboard() {
                   <select
                     value={editUserForm.role}
                     onChange={e => {
-                      const roleMap = { 'Super Admin': 'ROLE-001', 'Administrator': 'ROLE-002', 'Registry Staff': 'ROLE-003', 'Blood Bank Staff': 'ROLE-004', 'Issuance Personnel': 'ROLE-005', 'Hospital User': 'ROLE-006' };
+                      const roleMap = { 'Super Admin': 'ROLE-001', 'Administrator': 'ROLE-002', 'Registry Staff': 'ROLE-003', 'Blood Bank Staff': 'ROLE-004', 'Issuance Personnel': 'ROLE-005', 'Hospital User': 'ROLE-006', 'Serology Staff': 'ROLE-007', 'Production Staff': 'ROLE-008' };
                       setEditUserForm(f => ({ ...f, role: e.target.value, roleId: roleMap[e.target.value] || 'ROLE-003' }));
                     }}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs bg-slate-50/50 outline-none focus:border-slate-800"
@@ -3582,6 +3584,10 @@ export default function AdminDashboard() {
                     <option>Registry Staff</option>
                     <option>Blood Bank Staff</option>
                     <option>Issuance Personnel</option>
+                    <option>Serology Staff</option>
+                    <option>Production Staff</option>
+                    <option>Serology Staff</option>
+                    <option>Production Staff</option>
                     <option>Hospital User</option>
                     <option>Administrator</option>
                     {isSuperAdmin && <option>Super Admin</option>}

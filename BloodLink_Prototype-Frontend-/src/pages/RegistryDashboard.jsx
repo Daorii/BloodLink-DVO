@@ -481,7 +481,7 @@ export default function RegistryDashboard() {
               {tab === 'registry' ? 'Donor Database Registry' : tab === 'recall' ? 'SMS Recall Operations' : 'Laboratory Serology Results (Section II)'}
             </h2>
             <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5 tracking-wider">
-              {tab === 'registry' ? 'Manage registered donor logs and statuses' : tab === 'recall' ? 'Targeted dispatch for critical shortages' : 'Record and manage lab-confirmed serology results'}
+              {tab === 'registry' ? 'Manage registered donor logs and statuses' : tab === 'recall' ? 'Targeted dispatch for critical shortages' : 'Record and manage lab-confirmed serology & TTI screening results (Serology Staff workspace)'}
             </p>
           </div>
 

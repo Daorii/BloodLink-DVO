@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useBloodStore } from '../store/useBloodStore';
 import {
-  Archive, Stethoscope, LogOut,
+  Archive, Stethoscope, LogOut, Layers, FlaskConical, Cpu, Check,
   CheckCircle, XCircle, Droplets, Clock, Activity, AlertTriangle, Database, FileText, Plus, X, Tag,
   ChevronsLeft, ChevronsRight
 } from 'lucide-react';
@@ -217,10 +217,10 @@ export default function BloodBankDashboard() {
         <header className="sticky top-0 z-20 bg-white border-b border-slate-200 h-16 flex items-center justify-between px-8">
           <div>
             <h2 className="text-slate-900 font-bold text-sm leading-tight">
-              {tab === 'inventory' ? 'Blood Component Inventory' : tab === 'requests' ? 'Hospital Issuance Queue' : 'Distribution Recommendation'}
+              {tab === 'inventory' ? 'Blood Component Inventory' : tab === 'requests' ? 'Hospital Issuance Queue' : tab === 'processing' ? 'Production Component Processing (DOH Standards)' : 'Distribution Recommendation'}
             </h2>
             <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5 tracking-wider">
-              {tab === 'inventory' ? 'Live tracking of PRBC, FFP, Cryoprecipitate, and Cryosupernate levels' : tab === 'requests' ? 'Review pending requests and process blood unit issuance' : 'Equity-based blood distribution recommendations across hospital network'}
+              {tab === 'inventory' ? 'Live tracking of PRBC, FFP, Cryoprecipitate, and Cryosupernate levels' : tab === 'requests' ? 'Review pending requests and process blood unit issuance' : tab === 'processing' ? 'Component separation, fractionation, and yield tracking by Production Staff' : 'Equity-based blood distribution recommendations across hospital network'}
             </p>
           </div>
 
@@ -745,6 +745,114 @@ export default function BloodBankDashboard() {
                     <CheckCircle className="w-3.5 h-3.5" />
                     {processing ? 'Processing...' : (isPartial ? 'Confirm Partial Fulfillment' : 'Confirm & Prepare for Release')}
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: PRODUCTION COMPONENT PROCESSING */}
+          {tab === 'processing' && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              {/* Stat Banners */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Batches Processed</span>
+                    <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center font-bold">
+                      <Layers className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <p className="text-2xl font-black text-slate-900 mt-2">{(componentProcessingLogs || []).length}</p>
+                  <p className="text-[10px] text-emerald-600 font-bold mt-1">100% Quality Inspected</p>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">PRBC Average Yield</span>
+                    <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center font-bold">
+                      <Droplets className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <p className="text-2xl font-black text-slate-900 mt-2">280 mL</p>
+                  <p className="text-[10px] text-slate-500 font-medium mt-1">From 450 mL Whole Blood</p>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Platelet Concentrates</span>
+                    <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+                      <FlaskConical className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <p className="text-2xl font-black text-slate-900 mt-2">{(componentProcessingLogs || []).filter(p => p.componentType === 'Platelet Concentrate').length || 1}</p>
+                  <p className="text-[10px] text-amber-600 font-bold mt-1">5-Day Short Shelf Life</p>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Plasma Fractionation</span>
+                    <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                      <Cpu className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <p className="text-2xl font-black text-slate-900 mt-2">100%</p>
+                  <p className="text-[10px] text-indigo-600 font-bold mt-1">FFP & Cryo Ready</p>
+                </div>
+              </div>
+
+              {/* Action Bar */}
+              <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Component Processing Ledger</h3>
+                  <p className="text-xs text-slate-500">Record component preparation & automatically update inventory stock</p>
+                </div>
+                <button
+                  onClick={() => setShowProcessModal(true)}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" /> Process New Whole Blood Unit
+                </button>
+              </div>
+
+              {/* Ledger Table */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      <tr>
+                        <th className="py-3 px-4">Processing ID</th>
+                        <th className="py-3 px-4">Source Unit Ref</th>
+                        <th className="py-3 px-4">Donor Name</th>
+                        <th className="py-3 px-4">Blood Group</th>
+                        <th className="py-3 px-4">Output Component</th>
+                        <th className="py-3 px-4">Yield (mL)</th>
+                        <th className="py-3 px-4">Centrifugation / Protocol</th>
+                        <th className="py-3 px-4">Expiry Date</th>
+                        <th className="py-3 px-4">Production Staff</th>
+                        <th className="py-3 px-4">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium">
+                      {(componentProcessingLogs || []).map((proc, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-3 px-4 font-bold text-slate-900">{proc.processingId}</td>
+                          <td className="py-3 px-4 font-semibold text-slate-700">{proc.unitRef}</td>
+                          <td className="py-3 px-4 text-slate-700">{proc.donorName}</td>
+                          <td className="py-3 px-4 font-black text-rose-600">{proc.bloodType}</td>
+                          <td className="py-3 px-4 font-bold text-indigo-700">{proc.componentType}</td>
+                          <td className="py-3 px-4 font-bold text-slate-900">{proc.yieldVolume} mL</td>
+                          <td className="py-3 px-4 text-slate-500 text-[11px]">{proc.processingMethod}</td>
+                          <td className="py-3 px-4 text-slate-600 font-semibold">{proc.expiryDate}</td>
+                          <td className="py-3 px-4 text-slate-700">{proc.processedBy}</td>
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800">
+                              {proc.status || 'Completed'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
