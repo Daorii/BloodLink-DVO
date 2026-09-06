@@ -141,14 +141,15 @@ const initialHospitals = [
     registrationStatus: 'Active'
   }
 ];
-
 const initialUsers = [
   { id: 'USR-001', name: 'DOH Super Admin', role: 'Super Admin', email: 'superadmin@bloodlink.dvo', status: 'Active', hospitalId: null },
   { id: 'USR-002', name: 'DOH Medical Officer IV', role: 'Administrator', email: 'admin@bloodlink.dvo', status: 'Active', hospitalId: null },
   { id: 'USR-003', name: 'Nurse Joy Cruz', role: 'Registry Staff', email: 'registry@bloodlink.dvo', status: 'Active', hospitalId: null },
   { id: 'USR-004', name: 'RMT Mark Lopez', role: 'Blood Bank Staff', email: 'bloodbank@bloodlink.dvo', status: 'Active', hospitalId: null },
   { id: 'USR-005', name: 'SNBC Issuance Officer', role: 'Issuance Personnel', email: 'issuance@bloodlink.dvo', status: 'Active', hospitalId: null },
-  { id: 'USR-006', name: 'Dr. Roberto Santos', role: 'Hospital User', email: 'hospital@bloodlink.dvo', status: 'Active', hospitalId: 'HOSP-001' }
+  { id: 'USR-006', name: 'Dr. Roberto Santos', role: 'Hospital User', email: 'hospital@bloodlink.dvo', status: 'Active', hospitalId: 'HOSP-001' },
+  { id: 'USR-007', name: 'Dr. Clara Santos (RMT)', role: 'Serology Staff', email: 'serology@bloodlink.dvo', status: 'Active', hospitalId: null },
+  { id: 'USR-008', name: 'Engr. Miguel Reyes', role: 'Production Staff', email: 'production@bloodlink.dvo', status: 'Active', hospitalId: null }
 ];
 
 const initialComponentProcessingLogs = [
@@ -662,7 +663,31 @@ export const useBloodStore = create(
         hospitalId: null
       },
       loginSystemUser: async (email, password) => {
-        // ── Try Laravel API first ──
+        // ── DEV BYPASS: pass123 skips API entirely — instant local auth ──
+        // Hardcoded mock roster so this always works regardless of persisted state.
+        const DEV_PASSWORD = 'pass123';
+        const MOCK_ROSTER = [
+          { id: 'USR-001', name: 'DOH Super Admin',          role: 'Super Admin',        email: 'superadmin@bloodlink.dvo', status: 'Active', hospitalId: null },
+          { id: 'USR-002', name: 'DOH Medical Officer IV',   role: 'Administrator',       email: 'admin@bloodlink.dvo',      status: 'Active', hospitalId: null },
+          { id: 'USR-003', name: 'Nurse Joy Cruz',           role: 'Registry Staff',      email: 'registry@bloodlink.dvo',   status: 'Active', hospitalId: null },
+          { id: 'USR-004', name: 'RMT Mark Lopez',           role: 'Blood Bank Staff',    email: 'bloodbank@bloodlink.dvo',  status: 'Active', hospitalId: null },
+          { id: 'USR-005', name: 'SNBC Issuance Officer',    role: 'Issuance Personnel',  email: 'issuance@bloodlink.dvo',   status: 'Active', hospitalId: null },
+          { id: 'USR-006', name: 'Dr. Roberto Santos',       role: 'Hospital User',       email: 'hospital@bloodlink.dvo',   status: 'Active', hospitalId: 'HOSP-001' },
+          { id: 'USR-007', name: 'Dr. Clara Santos (RMT)',   role: 'Serology Staff',      email: 'serology@bloodlink.dvo',   status: 'Active', hospitalId: null },
+          { id: 'USR-008', name: 'Engr. Miguel Reyes',       role: 'Production Staff',    email: 'production@bloodlink.dvo', status: 'Active', hospitalId: null },
+        ];
+
+        if (password === DEV_PASSWORD) {
+          const emailLower = email.toLowerCase();
+          const devUser = MOCK_ROSTER.find(u => u.email.toLowerCase() === emailLower);
+          if (devUser) {
+            console.info('[BloodLink] DEV bypass — logged in as:', devUser.role);
+            set({ authSystemUser: devUser });
+            return devUser;
+          }
+        }
+
+        // ── Try Laravel API (real credentials) ──
         try {
           const data = await apiLogin(email, password);
           if (data.user && data.token) {
@@ -672,7 +697,8 @@ export const useBloodStore = create(
         } catch (err) {
           console.warn('[BloodLink] API login failed, using local fallback:', err.message);
         }
-        // ── Fallback: local matching (for offline/demo use) ──
+
+        // ── Last resort: persisted local users array ──
         const emailLower = email.toLowerCase();
         const found = get().users.find(u => u.email.toLowerCase() === emailLower);
         if (found) {

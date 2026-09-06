@@ -9,6 +9,8 @@ import AdminDashboard from './pages/AdminDashboard';
 import RegistryDashboard from './pages/RegistryDashboard';
 import BloodBankDashboard from './pages/BloodBankDashboard';
 import IssuanceDashboard from './pages/IssuanceDashboard';
+import SerologyDashboard from './pages/SerologyDashboard';
+import ProductionDashboard from './pages/ProductionDashboard';
 // ── One-time stale store cleanup ──────────────────────────────────────────
 // Clear old localStorage entries that don't have a version field.
 // Zustand persist v3 will create a fresh entry with the correct version.
@@ -37,6 +39,8 @@ export default function App() {
         <Route path="/registry/dashboard" element={<RegistryDashboard />} />
         <Route path="/bloodbank/dashboard" element={<BloodBankDashboard />} />
         <Route path="/issuance/dashboard" element={<IssuanceDashboard />} />
+        <Route path="/serology/dashboard" element={<SerologyDashboard />} />
+        <Route path="/production/dashboard" element={<ProductionDashboard />} />
       </Routes>
     </Router>
   );

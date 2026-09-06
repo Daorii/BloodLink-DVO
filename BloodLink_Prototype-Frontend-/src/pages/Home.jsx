@@ -499,10 +499,14 @@ export default function Home() {
     const r = authenticatedUser.role;
     if (r === 'Super Admin' || r === 'Administrator') {
       navigate('/admin/dashboard');
-    } else if (r === 'Registry Staff' || r === 'Serology Staff') {
+    } else if (r === 'Registry Staff') {
       navigate('/registry/dashboard');
-    } else if (r === 'Blood Bank Staff' || r === 'Production Staff') {
+    } else if (r === 'Serology Staff') {
+      navigate('/serology/dashboard');
+    } else if (r === 'Blood Bank Staff') {
       navigate('/bloodbank/dashboard');
+    } else if (r === 'Production Staff') {
+      navigate('/production/dashboard');
     } else if (r === 'Issuance Personnel' || r === 'Hospital User') {
       navigate('/issuance/dashboard');
     } else {

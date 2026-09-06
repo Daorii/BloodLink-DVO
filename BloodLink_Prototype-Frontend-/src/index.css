@@ -4,8 +4,9 @@
   body {
     background-color: #F8FAFC; /* Slate-50 background for clean look */
     color: #0F172A; /* Slate-900 text */
-    font-family: 'Geist', 'Instrument Sans', sans-serif;
+    font-family: 'Geist', 'Instrument Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     letter-spacing: -0.015em;
+    -webkit-font-smoothing: antialiased;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -13,8 +14,8 @@
     letter-spacing: -0.025em;
   }
 
-  button {
-    border-radius: 9999px !important;
+  code, kbd, samp, pre, .font-mono {
+    font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
 }
 
