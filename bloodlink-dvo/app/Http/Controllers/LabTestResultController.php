@@ -26,8 +26,9 @@ class LabTestResultController extends Controller
     /**
      * POST /api/lab-results
      *
-     * Accepts: donorId, eventId (optional), donationDate, + all test fields.
-     * Automatically creates a PENDING donation record first, then attaches lab results.
+     * Accepts: donorId, eventId (optional), donationDate, serialNumber (optional), + all test fields.
+     * Automatically creates a PENDING donation record first (with auto-generated serial number),
+     * then attaches lab results.
      */
     public function store(Request $request): JsonResponse
     {
@@ -35,6 +36,7 @@ class LabTestResultController extends Controller
             'donorId'            => 'required|integer',
             'eventId'            => 'nullable|integer',
             'donationDate'       => 'required|date',
+            'serialNumber'       => 'nullable|string|max:20|unique:donations,serial_number',
             'hemoglobinResult'   => 'nullable|string|max:20',
             'bloodTypeConfirmed' => 'nullable|string|in:' . implode(',', self::VALID_BLOOD_TYPES),
             'hbsagResult'        => 'nullable|string|max:20',
@@ -53,11 +55,27 @@ class LabTestResultController extends Controller
                 ? $v['eventId'] : null;
         }
 
+        // Auto-generate serial number if not provided by staff
+        // Format: YYYY-NNNN (e.g. 2026-0001)
+        $serialNumber = $v['serialNumber'] ?? null;
+        if (!$serialNumber) {
+            $year  = date('Y');
+            $count = Donation::whereYear('created_at', $year)->count() + 1;
+            $serialNumber = $year . '-' . str_pad((string) $count, 4, '0', STR_PAD_LEFT);
+
+            // Ensure uniqueness (in case of race conditions)
+            while (Donation::where('serial_number', $serialNumber)->exists()) {
+                $count++;
+                $serialNumber = $year . '-' . str_pad((string) $count, 4, '0', STR_PAD_LEFT);
+            }
+        }
+
         // Step 1: Create a PENDING donation record (no screening outcome yet)
         $donation = Donation::create([
             'donor_id'          => $v['donorId'],
             'event_id'          => $eventId,
             'donation_date'     => $v['donationDate'],
+            'serial_number'     => $serialNumber,
             'screening_outcome' => null, // pending
             'recorded_by'       => $request->user()?->user_id,
         ]);
@@ -97,6 +115,7 @@ class LabTestResultController extends Controller
             'donorId'            => $donorId,
             'donor_id'           => $donorId,
             'donorName'          => $donorName,
+            'serialNumber'       => $r->donation?->serial_number,
             'hemoglobinResult'   => $r->hemoglobin_result,
             'bloodTypeConfirmed' => $r->blood_type_confirmed,
             'hbsagResult'        => $r->hbsag_result,

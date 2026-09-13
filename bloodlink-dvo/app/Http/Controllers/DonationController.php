@@ -109,6 +109,7 @@ class DonationController extends Controller
             'donorName'        => $d->donor ? $d->donor->name : null,
             'eventId'          => $eventId,
             'donationDate'     => $d->donation_date,
+            'serialNumber'     => $d->serial_number,
             'screeningOutcome' => $d->screening_outcome,  // null = pending
             'deferralReason'   => $d->deferral_reason,
             'deferralEndDate'  => $d->deferral_end_date,

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\BloodIssuance;
 use App\Models\BloodIssuanceItem;
+use App\Models\BloodInventory;
 use App\Models\BloodRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -111,6 +112,21 @@ class BloodIssuanceController extends Controller
 
             BloodRequest::where('request_id', $issuance->request_id)
                 ->update(['request_status' => 'Released']);
+
+            // Deduct from blood_inventory: mark N units as 'Issued' for each line item
+            foreach ($issuance->items as $item) {
+                $unitsToMark = $item->quantity_issued;
+                $availableUnits = BloodInventory::where('blood_type', $item->blood_type)
+                    ->where('component', $item->component)
+                    ->where('inventory_status', 'Available')
+                    ->orderBy('expiration_date') // FEFO: First Expiring First Out
+                    ->take($unitsToMark)
+                    ->get();
+
+                foreach ($availableUnits as $unit) {
+                    $unit->update(['inventory_status' => 'Issued']);
+                }
+            }
         });
 
         return response()->json([

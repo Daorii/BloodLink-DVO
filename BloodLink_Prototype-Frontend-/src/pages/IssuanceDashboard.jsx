@@ -19,14 +19,34 @@ const BLOOD_TYPES = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
 const SAFETY_STATUSES = ['Cleared', 'Hold-Quarantined', 'NCU', 'NS', 'Discarded'];
 const INTENDED_USES = ['Transfusable', 'Storage-Research Only', 'Restricted'];
 
+// Component specs — volume range (cc) + shelf life (days) based on DOH reference
+const COMPONENT_SPECS = {
+  'PRBC':                 { minCC: 230, maxCC: 330, shelfDays: 35 },
+  'Platelet Concentrate': { minCC: 50,  maxCC: 70,  shelfDays: 5  },
+  'FFP':                  { minCC: 150, maxCC: 250, shelfDays: 90 },
+  'Cryoprecipitate':      { minCC: 15,  maxCC: 30,  shelfDays: 180 },
+  'Cryosupernate':        { minCC: 190, maxCC: 210, shelfDays: 365 },
+};
+
+// Compute expiry date string (YYYY-MM-DD) from collectionDate + shelfDays
+function computeExpiry(collectionDate, component) {
+  const spec = COMPONENT_SPECS[component];
+  if (!spec || !collectionDate) return '';
+  const d = new Date(collectionDate);
+  d.setDate(d.getDate() + spec.shelfDays);
+  return d.toISOString().slice(0, 10);
+}
+
 const emptyUnitForm = {
   unitId: '',
+  serialNumber: '',
   donationId: '',
+  donorName: '',
   bloodType: 'O+',
   component: 'PRBC',
   collectionDate: new Date().toISOString().slice(0, 10),
-  expirationDate: '',
-  quantity: '450',
+  expirationDate: computeExpiry(new Date().toISOString().slice(0, 10), 'PRBC'),
+  quantity: '',
   safetyStatus: 'Cleared',
   intendedUse: 'Transfusable',
   inventoryStatus: 'Available'
@@ -72,8 +92,13 @@ export default function IssuanceDashboard() {
     recordBloodUnit,
     donations,
     donors,
+    labTestResults,
+    fetchDonationsFromAPI,
+    fetchBloodInventoryFromAPI,
     isSidebarCollapsed,
-    toggleSidebar
+    toggleSidebar,
+    equityResultsMap,
+    setEquityResult,
   } = useBloodStore();
 
   // ── Forecast filter states ──
@@ -94,6 +119,8 @@ export default function IssuanceDashboard() {
   useEffect(() => {
     fetchBloodRequestsFromAPI();
     fetchBloodIssuancesFromAPI();
+    fetchDonationsFromAPI();
+    fetchBloodInventoryFromAPI();
     if (role === 'Issuance Personnel' && (!granularForecasts || granularForecasts.length === 0)) {
       generateGranularForecast(4);
     }
@@ -132,12 +159,23 @@ export default function IssuanceDashboard() {
   const [isPartial,       setIsPartial]       = useState(false);
   const [processing,      setProcessing]      = useState(false);
   // Inventory add form state
-  const [showUnitForm,    setShowUnitForm]    = useState(false);
-  const [unitForm,        setUnitForm]        = useState({ ...emptyUnitForm });
-  const [unitSaved,       setUnitSaved]       = useState(false);
-  const [donationSearch,  setDonationSearch]  = useState('');
+  const [showUnitForm,      setShowUnitForm]      = useState(false);
+  const [unitForm,          setUnitForm]          = useState({ ...emptyUnitForm });
+  const [unitSaved,         setUnitSaved]         = useState(false);
+  const [donationSearch,    setDonationSearch]    = useState('');
+  const [serialInput,       setSerialInput]       = useState('');
+  const [serialStatus,      setSerialStatus]      = useState(null); // null | 'found' | 'not_found'
+  const [volumeError,       setVolumeError]       = useState('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('All');
+  const [componentFilter,    setComponentFilter]    = useState('All'); // 'All' | 'PRBC' | 'Platelet Concentrate' | etc.
+
   const [reqSubTab,       setReqSubTab]       = useState('pending');
+
+  // ── Equity-Based Distribution Reco state ─────────────────────────────
+  const [distBT,      setDistBT]      = useState('O+');
+  const [distComp,    setDistComp]    = useState('PRBC');
+  const [distReserve, setDistReserve] = useState(10);
+  // equityResultsMap lives in Zustand store — always current, no stale closures
 
   // Forecast Records table — independent filters
   const [recHospital, setRecHospital] = useState('ALL');
@@ -154,12 +192,84 @@ export default function IssuanceDashboard() {
     ? myRequests.filter(r => r.filedByIssuance === true)
     : myRequests;
 
+  // Serial number lookup handler
+  const FINALIZED_OUTCOMES = ['Accepted', 'Temporarily Deferred', 'Permanently Deferred', 'Indefinite Deferral'];
+
+  const handleSerialLookup = (serial) => {
+    setSerialInput(serial);
+    if (!serial.trim()) { setSerialStatus(null); return; }
+
+    const donation = (donations || []).find(d => d.serialNumber === serial.trim());
+
+    if (!donation) {
+      setSerialStatus('not_found');
+      setUnitForm(prev => ({ ...prev, serialNumber: serial.trim(), donationId: '', donorName: '' }));
+      return;
+    }
+
+    // Block if no screening outcome yet — Registry must finalize first
+    const outcome = donation.screeningOutcome ?? donation.screening_outcome ?? null;
+    if (!outcome || !FINALIZED_OUTCOMES.includes(outcome)) {
+      setSerialStatus('pending_outcome');
+      setUnitForm(prev => ({ ...prev, serialNumber: serial.trim(), donationId: '', donorName: '' }));
+      return;
+    }
+
+    // Find the matching lab result for confirmed blood type
+    const labResult = (labTestResults || []).find(
+      lr => (lr.donationId ?? lr.donation_id) === (donation.donation_id ?? donation.donationId)
+    );
+    const bloodType = labResult?.bloodTypeConfirmed ?? labResult?.blood_type_confirmed ?? 'O+';
+    const collDate  = donation.donationDate ?? donation.donation_date ?? '';
+    const newExpiry = computeExpiry(collDate, unitForm.component);
+
+    setUnitForm(prev => ({
+      ...prev,
+      serialNumber:   serial.trim(),
+      donationId:     donation.donation_id ?? donation.donationId ?? '',
+      donorName:      donation.donorName ?? '',
+      bloodType,
+      collectionDate: collDate,
+      expirationDate: newExpiry,
+    }));
+    setSerialStatus('found');
+  };
+
+  // When component changes: recalculate expiry and clear volume error
+  const handleComponentChange = (component) => {
+    const newExpiry = computeExpiry(unitForm.collectionDate, component);
+    setUnitForm(prev => ({ ...prev, component, expirationDate: newExpiry, quantity: '' }));
+    setVolumeError('');
+  };
+
+  // Volume validation
+  const validateVolume = (val, component) => {
+    const spec = COMPONENT_SPECS[component];
+    if (!spec) return '';
+    const num = parseFloat(val);
+    if (isNaN(num)) return 'Please enter a valid number.';
+    if (num < spec.minCC || num > spec.maxCC) {
+      return `${component} must be between ${spec.minCC}–${spec.maxCC} cc.`;
+    }
+    return '';
+  };
+
   // Inventory: commit blood unit
   const handleUnitSubmit = (e) => {
     e.preventDefault();
+    const err = validateVolume(unitForm.quantity, unitForm.component);
+    if (err) { setVolumeError(err); return; }
+    setVolumeError('');
     recordBloodUnit(unitForm);
     setUnitSaved(true);
-    setTimeout(() => { setUnitSaved(false); setUnitForm({ ...emptyUnitForm }); setShowUnitForm(false); setDonationSearch(''); }, 2000);
+    setTimeout(() => {
+      setUnitSaved(false);
+      setUnitForm({ ...emptyUnitForm });
+      setSerialInput('');
+      setSerialStatus(null);
+      setShowUnitForm(false);
+      setDonationSearch('');
+    }, 2000);
   };
 
   // Process modal helpers
@@ -168,22 +278,47 @@ export default function IssuanceDashboard() {
 
   const openProcess = (req) => {
     setProcessingReq(req);
-    setProcessItems((req.items || []).map(i => ({
-      bloodType: i.bloodType,
-      component: i.component,
-      requested: i.units,
-      quantityIssued: i.units,
-    })));
+    // Read equityResultsMap directly from Zustand store (always current)
+    const latestMap = useBloodStore.getState().equityResultsMap;
+    setProcessItems((req.items || []).map(i => {
+      const bt   = i.bloodType ?? i.blood_type ?? '';
+      const comp = i.component ?? i.bloodComponent ?? '';
+      const key  = `${bt}|${comp}`;
+      const computed  = latestMap[key];
+      const hospId    = req.hospitalId ?? req.hospital_id ?? '';
+      const equityRow = computed?.results?.find(r => r.hospitalId === hospId);
+      const prefill   = equityRow ? Math.min(equityRow.allocation, i.units) : i.units;
+      return {
+        bloodType:      bt,
+        component:      comp,
+        requested:      i.units,
+        quantityIssued: prefill,
+        equityRec:      equityRow?.allocation ?? null,
+        equityComputed: !!computed,
+      };
+    }));
     setProcessRemarks('');
     setIsPartial(false);
   };
 
   const handleProcess = async () => {
     if (!processingReq) return;
+    // Block if any NON-ZERO item exceeds available inventory
+    const stockError = processItems.find(i => i.quantityIssued > 0 && i.quantityIssued > availableUnits(i.bloodType, i.component));
+    if (stockError) {
+      alert(`Insufficient stock: Only ${availableUnits(stockError.bloodType, stockError.component)} unit(s) of ${stockError.bloodType} ${stockError.component} available.`);
+      return;
+    }
+    // At least one item must be issued
+    if (processItems.every(i => i.quantityIssued <= 0)) {
+      alert('Please enter a quantity greater than 0 for at least one item.');
+      return;
+    }
     setProcessing(true);
     const result = await processBloodRequest({
       requestId: processingReq.requestId,
-      items: processItems.map(i => ({ bloodType: i.bloodType, component: i.component, quantityIssued: i.quantityIssued })),
+      // Only send items that are actually being issued (quantity > 0)
+      items: processItems.filter(i => i.quantityIssued > 0).map(i => ({ bloodType: i.bloodType, component: i.component, quantityIssued: i.quantityIssued })),
       remarks: processRemarks,
       isPartial,
     });
@@ -527,6 +662,7 @@ export default function IssuanceDashboard() {
             </div>
           )}
 
+          {(activeTab === 'queue' || activeTab === 'requests') && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
             <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Total Requests</p>
@@ -549,6 +685,7 @@ export default function IssuanceDashboard() {
               <p className="text-[10px] text-slate-450 mt-1 font-semibold">Fulfilled & physically released</p>
             </div>
           </div>
+          )}
 
           {activeTab === 'queue' && (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -714,59 +851,119 @@ export default function IssuanceDashboard() {
                 </button>
               </div>
 
-              {/* Stock summary table — click row to filter bag registry */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs font-semibold text-slate-655">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
-                        <th className="px-6 py-3 font-bold">Blood Type</th>
-                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">PRBC (Units)</th>
-                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">Platelets</th>
-                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">FFP</th>
-                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">Cryoprecipitate</th>
-                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">Cryosupernate</th>
-                        <th className="px-6 py-3 font-bold text-center border-l border-slate-100">PRBC Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {inventory.map((item) => {
-                        const isSelected = selectedTypeFilter === item.type;
-                        return (
-                          <tr key={item.type}
-                            onClick={() => setSelectedTypeFilter(isSelected ? 'All' : item.type)}
-                            className={`cursor-pointer transition-all ${isSelected ? 'bg-rose-50/80 font-bold border-l-4 border-[#C21C24]' : 'hover:bg-slate-50/70'}`}
-                            title={`Click to filter bag registry for ${item.type}`}>
-                            <td className="px-6 py-3.5 flex items-center gap-2">
-                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-bold border text-[10px] font-mono shadow-2xs ${
-                                isSelected ? 'bg-[#C21C24] text-white border-[#C21C24]' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
-                                {item.type}
-                              </span>
-                              {isSelected && <span className="text-[9px] bg-rose-100 text-rose-800 font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider">Filtering</span>}
-                            </td>
-                            <td className="px-6 py-3.5 text-center border-l border-slate-100 font-bold text-sm text-slate-800">{item.units}</td>
-                            <td className="px-6 py-3.5 text-center border-l border-slate-100 font-bold text-slate-600">{item.platelets || 0}</td>
-                            <td className="px-6 py-3.5 text-center border-l border-slate-100 font-bold text-slate-600">{item.ffp || 0}</td>
-                            <td className="px-6 py-3.5 text-center border-l border-slate-100 font-bold text-slate-600">{item.cryo || 0}</td>
-                            <td className="px-6 py-3.5 text-center border-l border-slate-100 font-bold text-slate-600">{item.cryosup || 0}</td>
-                            <td className="px-6 py-3.5 text-center border-l border-slate-100">
-                              {item.status === 'safe' && <span className="bg-emerald-50 border border-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Safe</span>}
-                              {item.status === 'low' && <span className="bg-amber-50 border border-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><Activity className="w-3 h-3" /> Low</span>}
-                              {item.status === 'critical' && <span className="bg-rose-50 border border-rose-100 text-[#C21C24] px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Critical</span>}
-                            </td>
+              {/* Stock summary table — each cell clickable to filter registry */}
+              {(() => {
+                const BLOOD_TYPE_ORDER = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
+                const THRESHOLDS = { 'O+': 15, 'O-': 5, 'A+': 10, 'A-': 3, 'B+': 10, 'B-': 3, 'AB+': 5, 'AB-': 2 };
+                const COMPONENT_KEY = { 'PRBC': 'units', 'Platelet Concentrate': 'platelets', 'FFP': 'ffp', 'Cryoprecipitate': 'cryo', 'Cryosupernate': 'cryosup' };
+                const COMP_COLS = [
+                  { label: 'PRBC (Units)',    key: 'units',     comp: 'PRBC' },
+                  { label: 'Platelets',       key: 'platelets', comp: 'Platelet Concentrate' },
+                  { label: 'FFP',             key: 'ffp',       comp: 'FFP' },
+                  { label: 'Cryoprecipitate', key: 'cryo',      comp: 'Cryoprecipitate' },
+                  { label: 'Cryosupernate',   key: 'cryosup',   comp: 'Cryosupernate' },
+                ];
+
+                const stockMap = {};
+                BLOOD_TYPE_ORDER.forEach(bt => { stockMap[bt] = { units: 0, platelets: 0, ffp: 0, cryo: 0, cryosup: 0 }; });
+                (bloodInventory || []).filter(u => u.inventoryStatus === 'Available').forEach(u => {
+                  const bt = u.bloodType ?? u.bloodTypeId;
+                  const comp = u.component ?? u.componentId;
+                  const key = COMPONENT_KEY[comp];
+                  if (stockMap[bt] && key) stockMap[bt][key] += 1;
+                });
+
+                const computedRows = BLOOD_TYPE_ORDER.map(bt => {
+                  const s = stockMap[bt];
+                  const threshold = THRESHOLDS[bt] ?? 5;
+                  const status = s.units === 0 ? 'critical' : s.units < threshold ? 'low' : 'safe';
+                  return { type: bt, ...s, threshold, status };
+                });
+
+                const handleCellClick = (bt, comp) => {
+                  const isSameCell = selectedTypeFilter === bt && componentFilter === comp;
+                  if (isSameCell) {
+                    setSelectedTypeFilter('All'); setComponentFilter('All');
+                  } else {
+                    setSelectedTypeFilter(bt); setComponentFilter(comp);
+                  }
+                };
+
+                return (
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs font-semibold">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
+                            <th className="px-6 py-3 font-bold">Blood Type</th>
+                            {COMP_COLS.map(c => (
+                              <th key={c.comp} className="px-6 py-3 font-bold text-center border-l border-slate-100">{c.label}</th>
+                            ))}
+                            <th className="px-6 py-3 font-bold text-center border-l border-slate-100">PRBC Status</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {computedRows.map((item) => (
+                            <tr key={item.type} className="hover:bg-slate-50/30 transition-all">
+                              {/* Blood Type badge — non-clickable */}
+                              <td className="px-6 py-3.5">
+                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full font-bold border text-[10px] font-mono bg-slate-100 text-slate-700 border-slate-200">
+                                  {item.type}
+                                </span>
+                              </td>
+                              {/* Component cells — each individually clickable */}
+                              {COMP_COLS.map(c => {
+                                const isActive = selectedTypeFilter === item.type && componentFilter === c.comp;
+                                return (
+                                  <td key={c.comp}
+                                    onClick={() => handleCellClick(item.type, c.comp)}
+                                    title={`Click to filter registry: ${item.type} · ${c.comp}`}
+                                    className={`px-6 py-3.5 text-center border-l border-slate-100 font-bold text-sm cursor-pointer select-none rounded transition-all ${
+                                      isActive
+                                        ? 'bg-[#C21C24] text-white shadow-inner'
+                                        : 'hover:bg-rose-50 hover:text-[#C21C24] text-slate-700'
+                                    }`}>
+                                    {item[c.key]}
+                                    {isActive && <span className="block text-[8px] font-normal opacity-80 mt-0.5">▼ filtering</span>}
+                                  </td>
+                                );
+                              })}
+                              {/* Status badge — non-clickable */}
+                              <td className="px-6 py-3.5 text-center border-l border-slate-100">
+                                {item.status === 'safe'     && <span className="bg-emerald-50 border border-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Safe</span>}
+                                {item.status === 'low'      && <span className="bg-amber-50 border border-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><Activity className="w-3 h-3" /> Low</span>}
+                                {item.status === 'critical' && <span className="bg-rose-50 border border-rose-100 text-[#C21C24] px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Critical</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {(selectedTypeFilter !== 'All' || componentFilter !== 'All') && (
+                      <div className="px-6 py-2 bg-rose-50 border-t border-rose-100 flex items-center gap-2 text-[11px] text-rose-700 font-semibold">
+                        <span>Filtering registry by:</span>
+                        {selectedTypeFilter !== 'All' && <span className="bg-white border border-rose-200 px-2 py-0.5 rounded font-mono font-bold">{selectedTypeFilter}</span>}
+                        {componentFilter !== 'All' && <span className="bg-white border border-rose-200 px-2 py-0.5 rounded font-bold">{componentFilter}</span>}
+                        <button onClick={() => { setSelectedTypeFilter('All'); setComponentFilter('All'); }}
+                          className="ml-auto text-rose-500 hover:text-rose-800 font-extrabold cursor-pointer">✕ Clear filter</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
 
               {/* Physical Blood Bag Registry */}
               {(() => {
-                const filteredInventory = (bloodInventory || []).filter(unit =>
-                  selectedTypeFilter === 'All' ? true : unit.bloodTypeId === selectedTypeFilter
-                );
+                const filteredInventory = (bloodInventory || []).filter(unit => {
+                  const bt   = unit.bloodType ?? unit.bloodTypeId;
+                  const comp = unit.component ?? unit.componentId;
+                  const btMatch     = selectedTypeFilter === 'All' || bt === selectedTypeFilter;
+                  const compMatch   = componentFilter    === 'All' || comp === componentFilter;
+                  // Only show Available units — Issued/Expired units are no longer in usable stock
+                  const statusMatch = unit.inventoryStatus === 'Available';
+                  return btMatch && compMatch && statusMatch;
+                });
                 return (
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden space-y-4">
                     <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
@@ -774,10 +971,12 @@ export default function IssuanceDashboard() {
                         <h3 className="font-bold text-slate-900 flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
                           <Database className="w-4 h-4 text-indigo-600" /> Physical Blood Bag Registry
                         </h3>
-                        {selectedTypeFilter !== 'All' && (
+                        {(selectedTypeFilter !== 'All' || componentFilter !== 'All') && (
                           <span className="text-[10px] bg-rose-50 border border-rose-200 text-rose-700 font-bold px-2 py-0.5 rounded flex items-center gap-1">
-                            Filtered by {selectedTypeFilter}
-                            <button onClick={() => setSelectedTypeFilter('All')} className="hover:text-rose-900 font-extrabold ml-1 cursor-pointer" title="Clear filter">✕</button>
+                            {selectedTypeFilter !== 'All' && <span className="font-mono">{selectedTypeFilter}</span>}
+                            {selectedTypeFilter !== 'All' && componentFilter !== 'All' && <span>·</span>}
+                            {componentFilter !== 'All' && <span>{componentFilter}</span>}
+                            <button onClick={() => { setSelectedTypeFilter('All'); setComponentFilter('All'); }} className="hover:text-rose-900 font-extrabold ml-1 cursor-pointer" title="Clear filter">✕</button>
                           </span>
                         )}
                       </div>
@@ -798,12 +997,13 @@ export default function IssuanceDashboard() {
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
                             <th className="px-5 py-3 font-bold">Unit ID</th>
-                            <th className="px-5 py-3 font-bold">Donation ID</th>
+                            <th className="px-5 py-3 font-bold">Serial No.</th>
+                            <th className="px-5 py-3 font-bold">Donor</th>
                             <th className="px-5 py-3 font-bold text-center">Type</th>
                             <th className="px-5 py-3 font-bold">Component</th>
                             <th className="px-5 py-3 font-bold text-center">Collected</th>
                             <th className="px-5 py-3 font-bold text-center">Expiry</th>
-                            <th className="px-5 py-3 font-bold text-center">Qty (mL)</th>
+                            <th className="px-5 py-3 font-bold text-center">Volume (CC)</th>
                             <th className="px-5 py-3 font-bold text-center">Safety</th>
                             <th className="px-5 py-3 font-bold">Status</th>
                           </tr>
@@ -814,14 +1014,19 @@ export default function IssuanceDashboard() {
                               <td className="px-5 py-3 font-mono font-bold text-slate-900">
                                 <span className="bg-indigo-50 text-indigo-950 border border-indigo-100 px-2 py-0.5 rounded text-[11px] font-mono">{unit.unitId}</span>
                               </td>
-                              <td className="px-5 py-3 font-mono text-slate-400 text-[10px]">{unit.donationId}</td>
-                              <td className="px-5 py-3 text-center">
-                                <span className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded text-[10px] font-mono">{unit.bloodTypeId}</span>
+                              <td className="px-5 py-3 font-mono text-indigo-700 text-[11px] font-bold">
+                                {unit.serialNumber || <span className="text-slate-300">—</span>}
                               </td>
-                              <td className="px-5 py-3 font-bold text-slate-700">{unit.componentId}</td>
+                              <td className="px-5 py-3 text-xs text-slate-700 font-semibold max-w-[120px] truncate">
+                                {unit.donorName || <span className="text-slate-300">—</span>}
+                              </td>
+                              <td className="px-5 py-3 text-center">
+                                <span className="px-1.5 py-0.5 bg-rose-50 border border-rose-100 text-[#C21C24] font-black rounded text-[10px] font-mono">{unit.bloodType ?? unit.bloodTypeId}</span>
+                              </td>
+                              <td className="px-5 py-3 font-bold text-slate-700">{unit.component ?? unit.componentId}</td>
                               <td className="px-5 py-3 text-center font-mono text-[10px]">{unit.collectionDate || '—'}</td>
                               <td className="px-5 py-3 text-center font-mono text-[10px]">{unit.expirationDate}</td>
-                              <td className="px-5 py-3 text-center font-bold text-slate-800">{unit.quantity} mL</td>
+                              <td className="px-5 py-3 text-center font-bold text-slate-800">{unit.quantity} cc</td>
                               <td className="px-5 py-3 text-center">
                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                   unit.safetyStatus === 'Cleared' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
@@ -1133,46 +1338,314 @@ export default function IssuanceDashboard() {
           )}
 
           {/* ── TAB: DISTRIBUTION RECOMMENDATION ── */}
-          {isIssuanceStaff && activeTab === 'distribution' && (
-            <div className="space-y-5 animate-in fade-in duration-200">
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
-                <Activity className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                <div className="text-xs text-blue-800">
-                  <p className="font-bold mb-0.5">Equity-Based Blood Distribution Algorithm</p>
-                  <p className="text-blue-700">Allocations are computed proportionally based on hospital type weighting (Government 1.5×, Blood Bank 1.2×, Private 1.0×) and predicted demand week. Only units above safety threshold are recommended for release.</p>
+          {isIssuanceStaff && activeTab === 'distribution' && (() => {
+            const BLOOD_TYPES_LIST = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
+            const COMPONENTS_LIST  = ['PRBC', 'Platelet Concentrate', 'FFP', 'Cryoprecipitate', 'Cryosupernate'];
+
+            // Active blood requests — verified but NOT yet fully fulfilled
+            // Include 'Partially Fulfilled' so remaining unmet components still show
+            const activeReqs = (bloodRequests || []).filter(r =>
+              ['Verified', 'Pending Review', 'Approved', 'Partially Fulfilled'].includes(r.status)
+            );
+
+            const handleComputeEquity = () => {
+              // Ensure forecast exists — generate if empty
+              if (!granularForecasts || granularForecasts.length === 0) {
+                generateGranularForecast(4);
+              }
+              const gf = granularForecasts || [];
+
+              // Filter to selected BT + Component, nearest week (weeksAhead === 1)
+              const nearest = gf.filter(f =>
+                f.bloodTypeId === distBT &&
+                f.componentId === distComp &&
+                f.weeksAhead  === 1
+              );
+
+              // Count available bags from real inventory
+              const totalInventory = (bloodInventory || []).filter(u =>
+                (u.bloodType ?? u.bloodTypeId) === distBT &&
+                (u.component ?? u.componentId) === distComp &&
+                u.inventoryStatus === 'Available'
+              ).length;
+
+              const reserve   = Math.min(Number(distReserve) || 0, totalInventory);
+              const available = Math.max(0, totalInventory - reserve);
+
+              // Build per-hospital forecast map
+              const forecastMap = {};
+              nearest.forEach(f => {
+                forecastMap[f.hospitalId] = {
+                  hospitalId:   f.hospitalId,
+                  hospitalName: f.hospitalName,
+                  predicted:    f.predictedDemand,
+                };
+              });
+
+              // For hospitals with no forecast entry, default to 0
+              const allHospitals = hospitals || [];
+              const rows = allHospitals.map(h => ({
+                hospitalId:   h.id,
+                hospitalName: h.name,
+                hospitalType: h.type,
+                predicted:    forecastMap[h.id]?.predicted ?? 0,
+              }));
+
+              const totalForecast = rows.reduce((s, r) => s + r.predicted, 0);
+
+              // Compute equity allocation
+              const results = rows.map(r => {
+                const weight     = totalForecast > 0 ? r.predicted / totalForecast : 1 / rows.length;
+                const allocation = Math.round(weight * available);
+
+                // Find ALL active requests from this hospital that contain the selected BT+Component
+                const itemMatcher = it => {
+                  const bt   = it.bloodType  ?? it.blood_type   ?? '';
+                  const comp = it.component  ?? it.bloodComponent ?? '';
+                  return bt === distBT && comp === distComp;
+                };
+                const matchingReqs = activeReqs.filter(req => {
+                  const reqHospId = req.hospitalId ?? req.hospital_id ?? '';
+                  return reqHospId === r.hospitalId && (req.items || []).some(itemMatcher);
+                });
+
+                const hasRequest = matchingReqs.length > 0;
+                // Sum requested units across all matching requests for this hospital + BT + component
+                const reqUnits = matchingReqs.reduce((sum, req) => {
+                  const item = (req.items || []).find(itemMatcher);
+                  return sum + (item?.units ?? 0);
+                }, 0);
+
+                return {
+                  ...r,
+                  weight:      +(weight * 100).toFixed(1),
+                  allocation,
+                  hasRequest,
+                  reqUnits,
+                  canFulfill:  allocation >= reqUnits && reqUnits > 0 ? 'full'
+                              : allocation > 0 && reqUnits > 0 ? 'partial'
+                              : reqUnits === 0 ? 'no-req'
+                              : 'none',
+                };
+              });
+
+              const key = `${distBT}|${distComp}`;
+              setEquityResult(key, results, { totalInventory, reserve, available, totalForecast });
+            };
+
+            // Derive display state from the Zustand store for the currently selected BT+Comp
+            const currentKey   = `${distBT}|${distComp}`;
+            const currentEntry = equityResultsMap[currentKey];
+            const distComputed = !!currentEntry;
+            const distResults  = currentEntry?.results ?? [];
+            const distMeta     = currentEntry?.meta    ?? null;
+
+            return (
+              <div className="space-y-5 animate-in fade-in duration-200">
+
+                {/* Info banner */}
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
+                  <Activity className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-blue-800">
+                    <p className="font-bold text-sm mb-1">Equity-Based Blood Distribution Allocation</p>
+                    <p className="text-blue-700 leading-relaxed">
+                      Allocations are computed proportionally using the Multiple Linear Regression forecasted demand per hospital.
+                      A predefined emergency reserve is set aside first, then the remaining units are distributed based on each hospital's share of total predicted demand.
+                      This output is a <strong>decision-support recommendation only</strong> — final allocation is at the discretion of authorized SNBC-Mindanao personnel.
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {inventory.map(item => (
-                  <div key={item.type} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded text-sm font-mono">{item.type}</span>
-                        <span className={`text-[10px] font-bold uppercase ${item.status === 'critical' ? 'text-rose-600' : item.status === 'low' ? 'text-amber-600' : 'text-emerald-600'}`}>
-                          {item.status === 'critical' ? '⚠ Critical Stock' : item.status === 'low' ? '↓ Low Stock' : '✓ Stable'}
-                        </span>
-                      </div>
-                      <span className="text-xs font-mono font-bold text-slate-700">Stock: {item.units} units</span>
+
+                {/* Configuration Panel */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4 flex items-center gap-2">
+                    <Database className="w-4 h-4 text-indigo-500" /> Allocation Parameters
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1.5">Blood Type</label>
+                      <select value={distBT} onChange={e => setDistBT(e.target.value)}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-slate-50">
+                        {BLOOD_TYPES_LIST.map(bt => <option key={bt} value={bt}>{bt}</option>)}
+                      </select>
                     </div>
-                    <div className="space-y-2 text-xs">
-                      <div className="flex justify-between text-slate-500 font-semibold">
-                        <span>SPMC (Government)</span>
-                        <span className="font-mono text-slate-900 font-bold">{Math.round(item.units * 0.5)} units (50%)</span>
-                      </div>
-                      <div className="flex justify-between text-slate-500 font-semibold">
-                        <span>Red Cross (Blood Bank)</span>
-                        <span className="font-mono text-slate-900 font-bold">{Math.round(item.units * 0.3)} units (30%)</span>
-                      </div>
-                      <div className="flex justify-between text-slate-500 font-semibold">
-                        <span>DMSF Hospital (Private)</span>
-                        <span className="font-mono text-slate-900 font-bold">{Math.round(item.units * 0.2)} units (20%)</span>
-                      </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1.5">Blood Component</label>
+                      <select value={distComp} onChange={e => setDistComp(e.target.value)}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-slate-50">
+                        {COMPONENTS_LIST.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1.5">Emergency Reserve (units)</label>
+                      <input type="number" min={0} value={distReserve}
+                        onChange={e => setDistReserve(Math.max(0, Number(e.target.value)))}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-slate-50" />
+                      <p className="text-[10px] text-slate-400 mt-1">Units reserved for emergencies before distribution</p>
                     </div>
                   </div>
-                ))}
+                  <div className="mt-4 flex justify-end">
+                    <button onClick={handleComputeEquity}
+                      className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white text-xs font-bold px-5 py-2.5 rounded-lg shadow transition-colors cursor-pointer">
+                      <Activity className="w-3.5 h-3.5" /> Compute Equity Allocation
+                    </button>
+                  </div>
+                </div>
+
+                {/* Results — shown after compute */}
+                {distComputed && distMeta && (
+                  <>
+                    {/* Summary cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {[
+                        { label: 'Total Inventory', value: distMeta.totalInventory, sub: `${distBT} ${distComp} available`, color: 'indigo' },
+                        { label: 'Emergency Reserve', value: distMeta.reserve, sub: 'Units set aside', color: 'amber' },
+                        { label: 'Distributable Units', value: distMeta.available, sub: 'After reserve deduction', color: 'emerald' },
+                        { label: 'Total Forecast Demand', value: distMeta.totalForecast, sub: 'Across all hospitals (MLR Week 9)', color: 'blue' },
+                      ].map(card => (
+                        <div key={card.label} className={`bg-white border border-slate-200 rounded-xl p-4 shadow-sm`}>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">{card.label}</p>
+                          <p className={`text-2xl font-black ${
+                            card.color === 'indigo' ? 'text-indigo-700' :
+                            card.color === 'amber'  ? 'text-amber-600' :
+                            card.color === 'emerald'? 'text-emerald-600' : 'text-blue-700'
+                          }`}>{card.value}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{card.sub}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Allocation Table */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                      <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Recommended Allocation</h3>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{distBT} · {distComp} · {new Date().toLocaleDateString('en-PH', { dateStyle: 'medium' })}</p>
+                        </div>
+                        <span className="text-[10px] bg-blue-50 border border-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded">
+                          {distResults.length} hospitals
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-100 uppercase tracking-wider text-slate-400 font-bold">
+                              <th className="px-5 py-3">Hospital</th>
+                              <th className="px-5 py-3 text-center">Type</th>
+                              <th className="px-5 py-3 text-center">MLR Forecast</th>
+                              <th className="px-5 py-3 text-center">Equity Share</th>
+                              <th className="px-5 py-3 text-center">Recommended Allocation</th>
+                              <th className="px-5 py-3 text-center">Active Request</th>
+                              <th className="px-5 py-3 text-center">Fulfillment</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {distResults.map(row => (
+                              <tr key={row.hospitalId} className={`transition-colors ${
+                                row.hasRequest ? 'bg-blue-50/40 hover:bg-blue-50/70' : 'hover:bg-slate-50/60'
+                              }`}>
+                                <td className="px-5 py-3.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-slate-900 text-sm">{row.hospitalName}</span>
+                                    {row.hasRequest && (
+                                      <span className="text-[9px] bg-blue-100 text-blue-700 border border-blue-200 font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider">Has Request</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-5 py-3.5 text-center">
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                    row.hospitalType === 'Government' ? 'bg-indigo-50 border-indigo-100 text-indigo-700' :
+                                    row.hospitalType === 'Blood Bank'  ? 'bg-rose-50 border-rose-100 text-rose-700' :
+                                    'bg-slate-50 border-slate-200 text-slate-600'
+                                  }`}>{row.hospitalType}</span>
+                                </td>
+                                <td className="px-5 py-3.5 text-center font-bold text-slate-700">{row.predicted}</td>
+                                <td className="px-5 py-3.5 text-center">
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="font-bold text-slate-800">{row.weight}%</span>
+                                    <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                      <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${row.weight}%` }} />
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-5 py-3.5 text-center">
+                                  <span className="text-lg font-black text-slate-900">{row.allocation}</span>
+                                  <span className="text-[10px] text-slate-400 ml-1">units</span>
+                                </td>
+                                <td className="px-5 py-3.5 text-center">
+                                  {row.hasRequest
+                                    ? <span className="font-bold text-blue-700">{row.reqUnits} units</span>
+                                    : <span className="text-slate-300 font-semibold">—</span>
+                                  }
+                                </td>
+                                <td className="px-5 py-3.5 text-center">
+                                  {row.canFulfill === 'full'    && <span className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded"><CheckCircle className="w-3 h-3" /> Fully Met</span>}
+                                  {row.canFulfill === 'partial' && <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded"><AlertTriangle className="w-3 h-3" /> Partial</span>}
+                                  {row.canFulfill === 'no-req'  && <span className="text-slate-300 text-[10px] font-semibold">No Request</span>}
+                                  {row.canFulfill === 'none'    && <span className="inline-flex items-center gap-1 bg-rose-50 border border-rose-100 text-[#C21C24] text-[10px] font-bold px-2 py-0.5 rounded"><AlertTriangle className="w-3 h-3" /> Cannot Fulfill</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="bg-slate-50 border-t border-slate-200 font-bold text-slate-700">
+                              <td className="px-5 py-3" colSpan={2}>Totals</td>
+                              <td className="px-5 py-3 text-center">{distMeta.totalForecast}</td>
+                              <td className="px-5 py-3 text-center">100%</td>
+                              <td className="px-5 py-3 text-center">{distMeta.available} units</td>
+                              <td colSpan={2} />
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Formula Transparency Panel */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4 flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-indigo-500" /> Algorithm Computation (Equity Formula)
+                      </h3>
+                      <div className="space-y-3 text-xs text-slate-700">
+                        <div className="bg-slate-50 rounded-lg p-3 font-mono text-[11px] space-y-1">
+                          <p className="text-slate-400 font-sans font-semibold mb-2">Step 1 — Available Blood for Distribution:</p>
+                          <p>AvailableBlood = TotalInventory &minus; EmergencyReserve</p>
+                          <p className="text-indigo-700 font-bold">AvailableBlood = {distMeta.totalInventory} &minus; {distMeta.reserve} = <strong>{distMeta.available} units</strong></p>
+                        </div>
+                        <div className="bg-slate-50 rounded-lg p-3 font-mono text-[11px] space-y-1">
+                          <p className="text-slate-400 font-sans font-semibold mb-2">Step 2 — Proportional Allocation per Hospital:</p>
+                          <p>Allocation<sub>h</sub> = (ForecastedDemand<sub>h</sub> / TotalForecast) &times; AvailableBlood</p>
+                          <div className="mt-2 space-y-1">
+                            {distResults.map(row => (
+                              <p key={row.hospitalId} className="text-indigo-700">
+                                {row.hospitalName.split(' ')[0]}: ({row.predicted} / {distMeta.totalForecast}) &times; {distMeta.available} = <strong>{row.allocation}</strong>
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400 italic">
+                          Forecasted demand is generated by the Multiple Linear Regression model using historical blood issuance records.
+                          Emergency reserve of {distMeta.reserve} unit(s) is preserved before distribution.
+                          All recommendations are subject to final approval by authorized SNBC-Mindanao personnel.
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Placeholder when not yet computed */}
+                {!distComputed && (
+                  <div className="bg-white rounded-xl border border-dashed border-slate-200 p-12 text-center">
+                    <Activity className="w-10 h-10 text-slate-200 mx-auto mb-3" />
+                    <p className="font-bold text-slate-400 text-sm">No allocation computed yet</p>
+                    <p className="text-xs text-slate-300 mt-1">Select a blood type, component, and emergency reserve above, then click <strong>Compute Equity Allocation</strong>.</p>
+                  </div>
+                )}
+
               </div>
-            </div>
-          )}
+            );
+          })()}
+
+
 
           {/* ── TAB: DEMAND FORECAST (Issuance Personnel only) ── */}
           {isIssuanceStaff && activeTab === 'forecast' && (() => {
@@ -2074,20 +2547,46 @@ export default function IssuanceDashboard() {
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Adjust quantities to issue per item:</p>
               {processItems.map((item, idx) => {
                 const avail = availableUnits(item.bloodType, item.component);
+                const hasRec     = item.equityRec !== null && item.equityRec !== undefined;
+                const overRec    = hasRec && item.quantityIssued > item.equityRec;
                 return (
-                  <div key={idx} className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-lg px-4 py-3">
-                    <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-rose-50 text-[#C21C24] font-black text-[10px] border border-rose-100 font-mono flex-shrink-0">{item.bloodType}</span>
-                    <div className="flex-1">
-                      <p className="text-xs font-bold text-slate-800">{item.component}</p>
-                      <p className="text-[10px] text-slate-400">Requested: {item.requested} · Available: <span className={avail >= item.requested ? 'text-emerald-600 font-bold' : 'text-amber-600 font-bold'}>{avail}</span></p>
+                  <div key={idx} className="bg-slate-50 border border-slate-100 rounded-lg px-4 py-3 space-y-2">
+                    <div className="flex items-center gap-3">
+                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-rose-50 text-[#C21C24] font-black text-[10px] border border-rose-100 font-mono flex-shrink-0">{item.bloodType}</span>
+                      <div className="flex-1">
+                        <p className="text-xs font-bold text-slate-800">{item.component}</p>
+                        <p className="text-[10px] text-slate-400">
+                          Requested: {item.requested} · Available: <span className={avail >= item.requested ? 'text-emerald-600 font-bold' : 'text-amber-600 font-bold'}>{avail}</span>
+                          {hasRec && <span className="ml-2 text-indigo-600 font-semibold">· Equity Rec: {item.equityRec} units</span>}
+                        </p>
+                      </div>
+                      <input type="number" min={0} value={item.quantityIssued}
+                        onChange={e => {
+                          const val = parseInt(e.target.value) || 0;
+                          setProcessItems(prev => prev.map((p, i) => i === idx ? { ...p, quantityIssued: val } : p));
+                          setIsPartial(processItems.some((p, i) => i === idx ? val < p.requested : p.quantityIssued < p.requested));
+                        }}
+                        className={`w-16 border rounded-lg px-2 py-1 text-xs font-bold text-center focus:ring-2 outline-none ${
+                          overRec ? 'border-amber-400 focus:ring-amber-300 bg-amber-50' : 'border-slate-200 focus:ring-slate-900'
+                        }`} />
                     </div>
-                    <input type="number" min={0} max={item.requested} value={item.quantityIssued}
-                      onChange={e => {
-                        const val = parseInt(e.target.value) || 0;
-                        setProcessItems(prev => prev.map((p, i) => i === idx ? { ...p, quantityIssued: val } : p));
-                        setIsPartial(processItems.some((p, i) => i === idx ? val < p.requested : p.quantityIssued < p.requested));
-                      }}
-                      className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-center focus:ring-2 focus:ring-slate-900 outline-none" />
+                    {hasRec && overRec && (
+                      <div className="flex items-start gap-1.5 bg-amber-50 border border-amber-100 rounded-lg px-3 py-1.5 text-[10px] text-amber-800 font-semibold">
+                        <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5 text-amber-500" />
+                        <span>Quantity exceeds equity recommendation ({item.equityRec} units). Proceeding may affect allocations to other hospitals.</span>
+                      </div>
+                    )}
+                    {hasRec && !overRec && (
+                      <div className="flex items-center gap-1.5 text-[10px] text-indigo-600 font-semibold">
+                        <CheckCircle className="w-3 h-3" /> Within equity recommendation
+                      </div>
+                    )}
+                    {!item.equityComputed && (
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
+                        <Activity className="w-3 h-3" />
+                        <span>Run <strong>Distribution Reco</strong> for {item.bloodType} {item.component} to see equity recommendation before processing.</span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -2102,11 +2601,18 @@ export default function IssuanceDashboard() {
                   <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" /> Some quantities are below requested — this will be marked as Partially Fulfilled.
                 </div>
               )}
+              {/* Stock insufficiency error */}
+              {processItems.some(i => i.quantityIssued > availableUnits(i.bloodType, i.component)) && (
+                <div className="bg-rose-50 border border-rose-200 rounded-lg px-4 py-2 text-xs text-[#C21C24] font-semibold flex items-center gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" /> Insufficient inventory stock — reduce quantity to match available units before confirming.
+                </div>
+              )}
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setProcessingReq(null)}
                   className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
-                <button onClick={handleProcess} disabled={processing}
-                  className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-full shadow-sm transition-colors flex items-center gap-1.5 disabled:opacity-60">
+                <button onClick={handleProcess}
+                  disabled={processing || processItems.some(i => i.quantityIssued > 0 && i.quantityIssued > availableUnits(i.bloodType, i.component)) || processItems.every(i => i.quantityIssued <= 0)}
+                  className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-full shadow-sm transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
                   <CheckCircle className="w-3.5 h-3.5" /> {processing ? 'Processing…' : 'Confirm Issuance'}
                 </button>
               </div>
@@ -2124,53 +2630,157 @@ export default function IssuanceDashboard() {
               <div className="flex items-center justify-between mt-0.5">
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-indigo-600" />
-                  <h3 className="font-bold text-slate-900 text-sm">Add Blood Unit</h3>
+                  <h3 className="font-bold text-slate-900 text-sm">Record Blood Component Unit</h3>
                 </div>
-                <button onClick={() => { setShowUnitForm(false); setDonationSearch(''); }} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100">
+                <button type="button" onClick={() => { setShowUnitForm(false); setSerialInput(''); setSerialStatus(null); setVolumeError(''); setDonationSearch(''); }} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100">
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
+
             <form onSubmit={handleUnitSubmit} className="p-6 space-y-4 overflow-y-auto flex-1">
+
+              {/* ── Step 1: Serial / Segment Number Lookup ── */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Physical Bag Serial / Barcode (optional)</label>
-                <input type="text" placeholder="e.g. BAG-DVO-2026-001 (auto-generated if blank)"
-                  value={unitForm.unitId} onChange={e => setUnitForm({ ...unitForm, unitId: e.target.value })}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none font-mono bg-slate-50/50" />
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Donation Serial / Segment No. <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="e.g. 2026-0001 — auto-fills blood type & collection date"
+                    value={serialInput}
+                    onChange={e => handleSerialLookup(e.target.value)}
+                    className={`w-full border rounded-lg px-3 py-2 text-xs font-mono font-bold focus:ring-2 outline-none ${
+                      serialStatus === 'found'           ? 'border-emerald-300 bg-emerald-50 text-emerald-800 focus:ring-emerald-300'
+                    : serialStatus === 'not_found'        ? 'border-rose-300 bg-rose-50 text-rose-700 focus:ring-rose-300'
+                    : serialStatus === 'pending_outcome'  ? 'border-amber-300 bg-amber-50 text-amber-800 focus:ring-amber-300'
+                    : 'border-indigo-200 bg-indigo-50/40 text-indigo-800 focus:ring-indigo-300'
+                    }`}
+                  />
+                </div>
+                {serialStatus === 'found' && (
+                  <div className="mt-1.5 flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                    <span className="text-[11px] font-bold text-emerald-800">
+                      {unitForm.donorName || 'Donor found'}
+                      <span className="ml-2 font-mono font-normal text-emerald-600">
+                        {unitForm.bloodType} · Collected {unitForm.collectionDate}
+                      </span>
+                    </span>
+                  </div>
+                )}
+                {serialStatus === 'not_found' && (
+                  <p className="mt-1 text-[10px] text-rose-500 font-semibold">Serial number not found in donations. Check the number or proceed with manual entry below.</p>
+                )}
+                {serialStatus === 'pending_outcome' && (
+                  <div className="mt-1.5 flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                    <span className="text-[11px] font-bold text-amber-800">
+                      Screening outcome not yet recorded for this donation. Registry must record Accept/Deferral before this unit can be added to inventory.
+                    </span>
+                  </div>
+                )}
               </div>
+
+              <hr className="border-slate-100" />
+
+              {/* ── Step 2: Blood Type & Component ── */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Blood Type <span className="text-rose-500">*</span></label>
-                  <select required value={unitForm.bloodType} onChange={e => setUnitForm({ ...unitForm, bloodType: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none bg-white">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Blood Type <span className="text-rose-500">*</span>
+                    {serialStatus === 'found' && <span className="ml-1 text-emerald-500 font-normal normal-case tracking-normal">auto-filled</span>}
+                  </label>
+                  <select required value={unitForm.bloodType}
+                    onChange={e => setUnitForm(prev => ({ ...prev, bloodType: e.target.value }))}
+                    disabled={serialStatus === 'found'}
+                    className={`w-full border rounded-lg px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-slate-900 outline-none ${
+                      serialStatus === 'found'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900 cursor-not-allowed opacity-90'
+                        : 'bg-white border-slate-200'
+                    }`}>
                     {BLOOD_TYPES.map(v => <option key={v}>{v}</option>)}
                   </select>
+                  {serialStatus === 'found' && (
+                    <p className="text-[9px] text-emerald-600 font-semibold mt-0.5 flex items-center gap-1">
+                      <CheckCircle className="w-3 h-3" /> Locked — sourced from donation record
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Component <span className="text-rose-500">*</span></label>
-                  <select required value={unitForm.component} onChange={e => setUnitForm({ ...unitForm, component: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none bg-white">
+                  <select required value={unitForm.component} onChange={e => handleComponentChange(e.target.value)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none bg-white font-semibold">
                     {COMPONENTS.map(v => <option key={v}>{v}</option>)}
                   </select>
+                  {COMPONENT_SPECS[unitForm.component] && (
+                    <p className="text-[9px] text-indigo-500 font-semibold mt-0.5">
+                      Range: {COMPONENT_SPECS[unitForm.component].minCC}–{COMPONENT_SPECS[unitForm.component].maxCC} cc · Shelf life: {COMPONENT_SPECS[unitForm.component].shelfDays} days
+                    </p>
+                  )}
                 </div>
               </div>
+
+              {/* ── Step 3: Collection Date & Auto Expiry ── */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Collection Date <span className="text-rose-500">*</span></label>
-                  <input type="date" required value={unitForm.collectionDate} onChange={e => setUnitForm({ ...unitForm, collectionDate: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none" />
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Collection Date <span className="text-rose-500">*</span>
+                    {serialStatus === 'found' && <span className="ml-1 text-emerald-500 font-normal normal-case tracking-normal">auto-filled</span>}
+                  </label>
+                  <input type="date" required value={unitForm.collectionDate}
+                    onChange={e => {
+                      const newExpiry = computeExpiry(e.target.value, unitForm.component);
+                      setUnitForm(prev => ({ ...prev, collectionDate: e.target.value, expirationDate: newExpiry }));
+                    }}
+                    className={`w-full border rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none ${
+                      serialStatus === 'found' ? 'bg-emerald-50 border-emerald-200' : 'border-slate-200'
+                    }`} />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Expiration Date <span className="text-rose-500">*</span></label>
-                  <input type="date" required value={unitForm.expirationDate} onChange={e => setUnitForm({ ...unitForm, expirationDate: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none" />
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Expiration Date <span className="text-rose-500">*</span>
+                    <span className="ml-1 text-indigo-400 font-normal normal-case tracking-normal">auto-calculated</span>
+                  </label>
+                  <input type="date" required value={unitForm.expirationDate}
+                    onChange={e => setUnitForm(prev => ({ ...prev, expirationDate: e.target.value }))}
+                    className="w-full border border-indigo-200 bg-indigo-50/30 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-300 outline-none" />
                 </div>
               </div>
+
+              {/* ── Step 4: Volume (CC) with range validation ── */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Quantity / Volume (mL) <span className="text-rose-500">*</span></label>
-                <input type="number" required min="1" step="0.01" value={unitForm.quantity} onChange={e => setUnitForm({ ...unitForm, quantity: e.target.value })}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none" placeholder="e.g. 450" />
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Volume (CC) <span className="text-rose-500">*</span>
+                  {COMPONENT_SPECS[unitForm.component] && (
+                    <span className="ml-1 text-slate-400 font-normal normal-case tracking-normal">
+                      Acceptable range: {COMPONENT_SPECS[unitForm.component].minCC}–{COMPONENT_SPECS[unitForm.component].maxCC} cc
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="number" required step="0.01"
+                  min={COMPONENT_SPECS[unitForm.component]?.minCC ?? 1}
+                  max={COMPONENT_SPECS[unitForm.component]?.maxCC ?? 9999}
+                  value={unitForm.quantity}
+                  onChange={e => {
+                    setUnitForm(prev => ({ ...prev, quantity: e.target.value }));
+                    setVolumeError(validateVolume(e.target.value, unitForm.component));
+                  }}
+                  placeholder={COMPONENT_SPECS[unitForm.component] ? `${COMPONENT_SPECS[unitForm.component].minCC}–${COMPONENT_SPECS[unitForm.component].maxCC}` : ''}
+                  className={`w-full border rounded-lg px-3 py-2 text-xs focus:ring-2 outline-none font-mono font-bold ${
+                    volumeError ? 'border-rose-300 bg-rose-50 text-rose-700 focus:ring-rose-300' : 'border-slate-200 bg-white focus:ring-slate-900'
+                  }`}
+                />
+                {volumeError && (
+                  <p className="mt-1 text-[10px] text-rose-500 font-semibold flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" /> {volumeError}
+                  </p>
+                )}
               </div>
+
+              {/* ── Step 5: Safety Status & Intended Use ── */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Safety Status <span className="text-rose-500">*</span></label>
@@ -2187,14 +2797,15 @@ export default function IssuanceDashboard() {
                   </select>
                 </div>
               </div>
+
               {unitSaved && (
                 <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-lg p-3 flex items-center gap-2">
                   <CheckCircle className="w-4 h-4" /> Unit recorded successfully! Inventory updated.
                 </div>
               )}
               <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setShowUnitForm(false)} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
-                <button type="submit" className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-full shadow-sm transition-colors flex items-center gap-1.5">
+                <button type="button" onClick={() => { setShowUnitForm(false); setSerialInput(''); setSerialStatus(null); setVolumeError(''); }} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+                <button type="submit" disabled={!!volumeError} className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-full shadow-sm transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
                   <Database className="w-3.5 h-3.5" /> Commit Unit
                 </button>
               </div>

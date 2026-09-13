@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BloodInventoryController;
 use App\Http\Controllers\BloodIssuanceController;
 use App\Http\Controllers\BloodRequestController;
 use App\Http\Controllers\DonationController;
@@ -81,6 +82,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/blood-requests', [BloodRequestController::class, 'index']);
     Route::post('/blood-requests', [BloodRequestController::class, 'store']);
     Route::put('/blood-requests/{id}/status', [BloodRequestController::class, 'updateStatus']);
+
+    // Blood Inventory
+    Route::get('/blood-inventory', [BloodInventoryController::class, 'index']);
+    Route::post('/blood-inventory', [BloodInventoryController::class, 'store']);
+    Route::put('/blood-inventory/{id}/status', [BloodInventoryController::class, 'updateStatus']);
 
     // Blood Issuances
     Route::get('/blood-issuances', [BloodIssuanceController::class, 'index']);

@@ -8,6 +8,7 @@ import { apiCreateDonation, apiGetDonations, apiUpdateDonationOutcome } from '..
 import { apiCreateLabResult, apiGetLabResults } from '../services/api';
 import { apiGetBloodRequests, apiCreateBloodRequest, apiUpdateBloodRequestStatus } from '../services/api';
 import { apiGetBloodIssuances, apiCreateBloodIssuance, apiApproveBloodRelease } from '../services/api';
+import { apiGetBloodInventory, apiCreateBloodInventory } from '../services/api';
 
 const initialDonors = [
   // ── Sample Dataset: Donor Registrationssss ──
@@ -64,17 +65,9 @@ const initialDonors = [
   }
 ];
 
-const initialInventory = [
-  // ── Sample Dataset: Blood Componentss ──
-  { type: 'O+', units: 25, platelets: 180, ffp: 293, cryo: 113, cryosup: 51, threshold: 15, status: 'safe' },
-  { type: 'A+', units: 9, platelets: 64, ffp: 160, cryo: 85, cryosup: 31, threshold: 10, status: 'low' },
-  { type: 'B+', units: 9, platelets: 52, ffp: 140, cryo: 42, cryosup: 20, threshold: 10, status: 'low' },
-  { type: 'AB+', units: 4, platelets: 25, ffp: 40, cryo: 8, cryosup: 4, threshold: 5, status: 'critical' },
-  { type: 'O-', units: 4, platelets: 15, ffp: 0, cryo: 0, cryosup: 0, threshold: 5, status: 'critical' },
-  { type: 'A-', units: 2, platelets: 10, ffp: 0, cryo: 1, cryosup: 0, threshold: 3, status: 'critical' },
-  { type: 'B-', units: 1, platelets: 8, ffp: 1, cryo: 0, cryosup: 0, threshold: 3, status: 'critical' },
-  { type: 'AB-', units: 1, platelets: 5, ffp: 0, cryo: 0, cryosup: 0, threshold: 2, status: 'critical' }
-];
+// Stock summary is now computed from bloodInventory (DB-driven).
+const initialInventory = [];
+
 
 const initialRequests = [
   {
@@ -215,120 +208,8 @@ const initialLabTestResults = [
   { testId: 'LAB-003', donationId: 'DON-003', hemoglobinResult: '15.1', bloodTypeConfirmed: 'B-', hbsagResult: 'Non-Reactive', syphilisResult: 'Non-Reactive', hivResult: 'Non-Reactive', hcvResult: 'Non-Reactive', malariaResult: 'Non-Reactive', natResult: 'Non-Reactive', othersResult: '', recordedBy: 'USR-003' }
 ];
 
-const initialBloodInventory = [
-  // O+ (25 units)
-  ...Array.from({ length: 25 }, (_, i) => ({
-    unitId: `BU-2026-O+-${String(i + 1).padStart(3, '0')}`,
-    donationId: `DON-001`,
-    bloodTypeId: 'O+',
-    componentId: 'PRBC',
-    collectionDate: '2026-03-10',
-    expirationDate: '2026-04-21',
-    quantity: 450,
-    safetyStatus: 'Cleared',
-    intendedUse: 'Transfusable',
-    inventoryStatus: 'Available',
-    recordedBy: 'USR-004'
-  })),
-  // A+ (9 units)
-  ...Array.from({ length: 9 }, (_, i) => ({
-    unitId: `BU-2026-A+-${String(i + 1).padStart(3, '0')}`,
-    donationId: `DON-002`,
-    bloodTypeId: 'A+',
-    componentId: 'PRBC',
-    collectionDate: '2026-06-15',
-    expirationDate: '2026-07-20',
-    quantity: 450,
-    safetyStatus: 'Cleared',
-    intendedUse: 'Transfusable',
-    inventoryStatus: 'Available',
-    recordedBy: 'USR-004'
-  })),
-  // B+ (9 units)
-  ...Array.from({ length: 9 }, (_, i) => ({
-    unitId: `BU-2026-B+-${String(i + 1).padStart(3, '0')}`,
-    donationId: `DON-003`,
-    bloodTypeId: 'B+',
-    componentId: 'PRBC',
-    collectionDate: '2026-05-20',
-    expirationDate: '2026-06-25',
-    quantity: 450,
-    safetyStatus: 'Cleared',
-    intendedUse: 'Transfusable',
-    inventoryStatus: 'Available',
-    recordedBy: 'USR-004'
-  })),
-  // AB+ (4 units)
-  ...Array.from({ length: 4 }, (_, i) => ({
-    unitId: `BU-2026-AB+-${String(i + 1).padStart(3, '0')}`,
-    donationId: `DON-001`,
-    bloodTypeId: 'AB+',
-    componentId: 'PRBC',
-    collectionDate: '2026-04-05',
-    expirationDate: '2026-05-10',
-    quantity: 450,
-    safetyStatus: 'Cleared',
-    intendedUse: 'Transfusable',
-    inventoryStatus: 'Available',
-    recordedBy: 'USR-004'
-  })),
-  // O- (4 units)
-  ...Array.from({ length: 4 }, (_, i) => ({
-    unitId: `BU-2026-O--${String(i + 1).padStart(3, '0')}`,
-    donationId: `DON-001`,
-    bloodTypeId: 'O-',
-    componentId: 'PRBC',
-    collectionDate: '2026-01-15',
-    expirationDate: '2026-02-20',
-    quantity: 450,
-    safetyStatus: 'Cleared',
-    intendedUse: 'Transfusable',
-    inventoryStatus: 'Available',
-    recordedBy: 'USR-004'
-  })),
-  // A- (2 units)
-  ...Array.from({ length: 2 }, (_, i) => ({
-    unitId: `BU-2026-A--${String(i + 1).padStart(3, '0')}`,
-    donationId: `DON-002`,
-    bloodTypeId: 'A-',
-    collectionDate: '2026-06-25',
-    expirationDate: '2026-07-30',
-    componentId: 'PRBC',
-    quantity: 450,
-    safetyStatus: 'Cleared',
-    intendedUse: 'Transfusable',
-    inventoryStatus: 'Available',
-    recordedBy: 'USR-004'
-  })),
-  // B- (1 unit)
-  {
-    unitId: 'BU-2026-B--001',
-    donationId: 'DON-003',
-    bloodTypeId: 'B-',
-    componentId: 'PRBC',
-    collectionDate: '2026-05-20',
-    expirationDate: '2026-06-25',
-    quantity: 450,
-    safetyStatus: 'Cleared',
-    intendedUse: 'Transfusable',
-    inventoryStatus: 'Available',
-    recordedBy: 'USR-004'
-  },
-  // AB- (1 unit)
-  {
-    unitId: 'BU-2026-AB--001',
-    donationId: 'DON-001',
-    bloodTypeId: 'AB-',
-    componentId: 'PRBC',
-    collectionDate: '2026-04-05',
-    expirationDate: '2026-05-10',
-    quantity: 450,
-    safetyStatus: 'Cleared',
-    intendedUse: 'Transfusable',
-    inventoryStatus: 'Available',
-    recordedBy: 'USR-004'
-  }
-];
+// Blood inventory is now fully DB-driven — loaded via fetchBloodInventoryFromAPI on mount.
+const initialBloodInventory = [];
 
 const initialRecommendations = [
   {
@@ -579,8 +460,20 @@ export const useBloodStore = create(
       forecastData: initialForecastData,
       granularForecasts: [], // Seeded by generateGranularForecast on first call
       distributionLog: initialDistributionLog,
+      // Equity allocation results map — keyed by 'bloodType|component'
+      // Persists across tab switches; not persisted to localStorage
+      equityResultsMap: {}, // { 'O+|PRBC': { results: [], meta: {} }, ... }
       isSidebarCollapsed: false,
       toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
+
+      // Save one equity computation result into the map (keyed by 'bt|comp')
+      setEquityResult: (key, results, meta) => set(state => ({
+        equityResultsMap: { ...state.equityResultsMap, [key]: { results, meta } }
+      })),
+
+      // Clear all equity results (e.g., on logout)
+      clearEquityResults: () => set({ equityResultsMap: {} }),
+
       smsLogs: [
         {
           smsId: 'SMS-001',
@@ -879,6 +772,9 @@ export const useBloodStore = create(
           }
           const reqData = await apiGetBloodRequests();
           if (reqData.bloodRequests) set({ bloodRequests: reqData.bloodRequests });
+          // Re-fetch inventory so the UI reflects deducted units immediately
+          const { fetchBloodInventoryFromAPI } = get();
+          await fetchBloodInventoryFromAPI();
           return { success: true };
         } catch (err) {
           console.error('[BloodLink] approveBloodRelease failed:', err.message);
@@ -1251,12 +1147,14 @@ export const useBloodStore = create(
         const numericEventId  = labForm.eventId
           ? parseInt(String(labForm.eventId).replace(/^EVT-0*/i, ''), 10) : null;
 
+        let apiSucceeded = false;
         if (!isNaN(numericDonorId)) {
           try {
             await apiCreateLabResult({
               donorId:            numericDonorId,
               eventId:            (!isNaN(numericEventId) ? numericEventId : null),
               donationDate:       labForm.donationDate || new Date().toISOString().slice(0, 10),
+              serialNumber:       labForm.serialNumber || null,
               hemoglobinResult:   labForm.hemoglobinResult   || null,
               bloodTypeConfirmed: labForm.bloodTypeConfirmed || null,
               hbsagResult:        labForm.hbsagResult        || null,
@@ -1267,17 +1165,38 @@ export const useBloodStore = create(
               natResult:          labForm.natResult          || null,
               othersResult:       labForm.othersResult       || null,
             });
+            apiSucceeded = true;
           } catch (err) {
             console.error('[BloodLink] API createLabResult failed:', err.message, err.status || '');
           }
         }
 
-        // ── Always update local state ──
+        // ── If API succeeded, re-fetch from DB (prevents local duplicate) ──
+        if (apiSucceeded) {
+          try {
+            const [labData, donData] = await Promise.all([apiGetLabResults(), apiGetDonations()]);
+            const auditLogId = 'LOG-' + Math.floor(100 + Math.random() * 900);
+            set((state) => ({
+              labTestResults: labData.labResults ?? state.labTestResults,
+              donations:      donData.donations  ?? state.donations,
+              auditLogs: [{
+                logId: auditLogId, userId: state.authSystemUser?.id || 'USR-003',
+                action: `Encoded Lab Result — Serial ${labForm.serialNumber || 'auto'}`,
+                module: 'Laboratory', recordId: labForm.donorId, oldValue: null,
+                newValue: labForm.bloodTypeConfirmed, performedAt: new Date().toLocaleString()
+              }, ...state.auditLogs]
+            }));
+            return;
+          } catch (_) { /* fall through to local state update */ }
+        }
+
+        // ── Offline fallback: update local state only ──
         set((state) => {
           const testId = 'LAB-' + Math.floor(100 + Math.random() * 900);
           const newLabResult = {
             testId,
             donationId: labForm.donationId || '',
+            serialNumber: labForm.serialNumber || '',
             hemoglobinResult: labForm.hemoglobinResult || '14.5',
             bloodTypeConfirmed: labForm.bloodTypeConfirmed || 'O+',
             hbsagResult: labForm.hbsagResult || 'Non-Reactive',
@@ -1290,33 +1209,15 @@ export const useBloodStore = create(
             recordedBy: state.authSystemUser?.id || 'USR-003'
           };
 
-          // Update corresponding donor's bloodType if linked
-          const donation = state.donations.find(d => d.donationId === labForm.donationId);
-          let updatedDonors = state.donors;
-          if (donation) {
-            updatedDonors = state.donors.map(d =>
-              d.id === donation.donorId
-                ? { ...d, bloodType: labForm.bloodTypeConfirmed }
-                : d
-            );
-          }
-
           const auditLogId = 'LOG-' + Math.floor(100 + Math.random() * 900);
-          const newAuditLog = {
-            logId: auditLogId,
-            userId: state.authSystemUser?.id || 'USR-003',
-            action: `Encoded Laboratory Test Results for test ${testId}`,
-            module: 'Laboratory',
-            recordId: testId,
-            oldValue: null,
-            newValue: JSON.stringify(newLabResult),
-            performedAt: new Date().toLocaleString()
-          };
-
           return {
             labTestResults: [newLabResult, ...state.labTestResults],
-            donors: updatedDonors,
-            auditLogs: [newAuditLog, ...state.auditLogs]
+            auditLogs: [{
+              logId: auditLogId, userId: state.authSystemUser?.id || 'USR-003',
+              action: `Encoded Laboratory Test Results for test ${testId}`,
+              module: 'Laboratory', recordId: testId, oldValue: null,
+              newValue: JSON.stringify(newLabResult), performedAt: new Date().toLocaleString()
+            }, ...state.auditLogs]
           };
         });
       },
@@ -1441,6 +1342,7 @@ export const useBloodStore = create(
         };
 
         // Try API
+        let apiSucceeded = false;
         try {
           const hospitalNumId = parseInt(String(reqForm.hospitalId || '').replace(/^HOSP-0*/i, ''), 10);
           const data = await apiCreateBloodRequest({
@@ -1458,12 +1360,24 @@ export const useBloodStore = create(
           if (data.bloodRequest) {
             newRequest.refNo      = data.bloodRequest.refNo || refNo;
             newRequest.requestId  = data.bloodRequest.requestId ?? null;
+            apiSucceeded = true;
+            // Re-fetch from DB so the store has the canonical server record (prevents duplicates)
+            try {
+              const reqData = await apiGetBloodRequests();
+              if (reqData.bloodRequests) {
+                set({ bloodRequests: reqData.bloodRequests });
+                return newRequest.refNo;
+              }
+            } catch (_) { /* fall through to local add below */ }
           }
         } catch (err) {
           console.error('[BloodLink] API createBloodRequest failed:', err.message);
         }
 
-        set((state) => ({ bloodRequests: [newRequest, ...state.bloodRequests] }));
+        // Only add locally if API did not succeed (offline/fallback mode)
+        if (!apiSucceeded) {
+          set((state) => ({ bloodRequests: [newRequest, ...state.bloodRequests] }));
+        }
         return newRequest.refNo;
       },
 
@@ -1471,8 +1385,16 @@ export const useBloodStore = create(
         // Try API
         try {
           const req = get().bloodRequests.find(r => r.refNo === refNo);
-          if (req?.requestId) await apiUpdateBloodRequestStatus(req.requestId, { status, remarks: statusNote });
+          if (req?.requestId) {
+            await apiUpdateBloodRequestStatus(req.requestId, { status, remarks: statusNote });
+            // Re-fetch from DB to get the true persisted state
+            try {
+              const reqData = await apiGetBloodRequests();
+              if (reqData.bloodRequests) { set({ bloodRequests: reqData.bloodRequests }); return; }
+            } catch (_) {}
+          }
         } catch (err) { console.error('[BloodLink] API updateBloodRequestStatus failed:', err.message); }
+        // Fallback: update locally
         set((state) => ({
           bloodRequests: state.bloodRequests.map((req) =>
             req.refNo === refNo ? { ...req, status, statusNote } : req
@@ -1483,8 +1405,16 @@ export const useBloodStore = create(
       rejectRequest: async (refNo) => {
         try {
           const req = get().bloodRequests.find(r => r.refNo === refNo);
-          if (req?.requestId) await apiUpdateBloodRequestStatus(req.requestId, { status: 'Rejected' });
+          if (req?.requestId) {
+            await apiUpdateBloodRequestStatus(req.requestId, { status: 'Rejected' });
+            // Re-fetch from DB so the queue immediately reflects the rejection
+            try {
+              const reqData = await apiGetBloodRequests();
+              if (reqData.bloodRequests) { set({ bloodRequests: reqData.bloodRequests }); return; }
+            } catch (_) {}
+          }
         } catch (err) { console.error('[BloodLink] API rejectRequest failed:', err.message); }
+        // Fallback: update locally
         set((state) => ({
           bloodRequests: state.bloodRequests.map(req => req.refNo === refNo ? { ...req, status: 'Rejected' } : req)
         }));
@@ -1493,8 +1423,23 @@ export const useBloodStore = create(
       verifyRequest: async (refNo) => {
         try {
           const req = get().bloodRequests.find(r => r.refNo === refNo);
-          if (req?.requestId) await apiUpdateBloodRequestStatus(req.requestId, { status: 'Verified' });
+          if (req?.requestId) {
+            await apiUpdateBloodRequestStatus(req.requestId, { status: 'Verified' });
+            // Re-fetch from DB so queue immediately reflects the new status
+            try {
+              const reqData = await apiGetBloodRequests();
+              if (reqData.bloodRequests) {
+                const auditLogId = 'LOG-' + Math.floor(100 + Math.random() * 900);
+                set((state) => ({
+                  bloodRequests: reqData.bloodRequests,
+                  auditLogs: [{ logId: auditLogId, userId: state.authSystemUser?.id || 'USR-005', action: `Verified Request ${refNo} for ${req.hospital} (Sent to Blood Bank)`, module: 'Issuance', recordId: refNo, oldValue: 'Pending Verification', newValue: 'Verified', performedAt: new Date().toLocaleString() }, ...state.auditLogs]
+                }));
+                return;
+              }
+            } catch (_) {}
+          }
         } catch (err) { console.error('[BloodLink] API verifyRequest failed:', err.message); }
+        // Fallback: update locally
         set((state) => {
           const req = state.bloodRequests.find(r => r.refNo === refNo);
           if (!req) return state;
@@ -1595,68 +1540,75 @@ export const useBloodStore = create(
         });
       },
 
-      recordBloodUnit: (unitForm) => {
+      // ── Fetch inventory from API ─────────────────────────────────────────
+      fetchBloodInventoryFromAPI: async () => {
+        try {
+          const data = await apiGetBloodInventory();
+          if (data.bloodInventory) set({ bloodInventory: data.bloodInventory });
+        } catch (err) {
+          console.error('[BloodLink] fetchBloodInventoryFromAPI failed:', err.message);
+        }
+      },
+
+      recordBloodUnit: async (unitForm) => {
+        // ── Try API first ──
+        let apiSucceeded = false;
+        try {
+          await apiCreateBloodInventory({
+            donationId:     unitForm.donationId     || null,
+            unitCode:       unitForm.unitId         || null,
+            bloodType:      unitForm.bloodType      || 'O+',
+            component:      unitForm.component      || 'PRBC',
+            volumeCC:       parseFloat(unitForm.quantity) || 0,
+            collectionDate: unitForm.collectionDate || new Date().toISOString().slice(0, 10),
+            expirationDate: unitForm.expirationDate || '',
+            safetyStatus:   unitForm.safetyStatus   || 'Cleared',
+            intendedUse:    unitForm.intendedUse    || 'Transfusable',
+            inventoryStatus: 'Available',
+          });
+          apiSucceeded = true;
+        } catch (err) {
+          console.error('[BloodLink] apiCreateBloodInventory failed:', err.message);
+        }
+
+        // ── If API succeeded, re-fetch canonical state ──
+        if (apiSucceeded) {
+          try {
+            const data = await apiGetBloodInventory();
+            if (data.bloodInventory) { set({ bloodInventory: data.bloodInventory }); return; }
+          } catch (_) { /* fall through */ }
+        }
+
+        // ── Offline fallback: local state only ──
         set((state) => {
-          let assignedUnitId = (unitForm.unitId || unitForm.unitRefId || '').trim();
+          let assignedUnitId = (unitForm.unitId || '').trim();
           if (!assignedUnitId) {
             const existingIds = state.bloodInventory.map(u => {
               const numeric = parseInt(String(u.unitId).replace(/\D/g, ''), 10);
               return isNaN(numeric) ? 0 : numeric;
             });
             const nextNum = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
-            assignedUnitId = `BU-2026-${String(nextNum).padStart(3, '0')}`;
+            assignedUnitId = `BU-${new Date().getFullYear()}-${String(nextNum).padStart(3, '0')}`;
           }
-
           const newUnit = {
             unitId: assignedUnitId,
-            donationId: unitForm.donationId || ('DON-' + Math.floor(100 + Math.random() * 900)),
+            donationId: unitForm.donationId || '',
+            serialNumber: unitForm.serialNumber || '',
+            donorName: unitForm.donorName || '',
+            bloodType:  unitForm.bloodType  || 'O+',
             bloodTypeId: unitForm.bloodType || 'O+',
-            componentId: unitForm.component || 'PRBC',
+            component:   unitForm.component  || 'PRBC',
+            componentId: unitForm.component  || 'PRBC',
             collectionDate: unitForm.collectionDate || new Date().toISOString().slice(0, 10),
-            expirationDate: unitForm.expirationDate || new Date(Date.now() + 35 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-            quantity: parseFloat(unitForm.quantity) || 450,
-            safetyStatus: unitForm.safetyStatus || 'Cleared',
-            intendedUse: unitForm.intendedUse || 'Transfusable',
-            inventoryStatus: unitForm.inventoryStatus || 'Available',
+            expirationDate: unitForm.expirationDate || '',
+            quantity:       parseFloat(unitForm.quantity) || 0,
+            volumeCC:       parseFloat(unitForm.quantity) || 0,
+            safetyStatus:   unitForm.safetyStatus   || 'Cleared',
+            intendedUse:    unitForm.intendedUse    || 'Transfusable',
+            inventoryStatus: 'Available',
             recordedBy: state.authSystemUser?.id || 'USR-004',
-            updatedAt: new Date().toLocaleString()
           };
-
-          const newInventory = state.inventory.map(item => {
-            if (item.type === newUnit.bloodTypeId && newUnit.safetyStatus === 'Cleared' && newUnit.intendedUse === 'Transfusable') {
-              const componentKey = {
-                'PRBC': 'units',
-                'Platelet Concentrate': 'platelets',
-                'FFP': 'ffp',
-                'Cryoprecipitate': 'cryo',
-                'Cryosupernate': 'cryosup'
-              }[newUnit.componentId];
-              if (componentKey) {
-                const newTotal = (item[componentKey] || 0) + 1;
-                const status = (componentKey === 'units' ? newTotal : item.units) < item.threshold ? 'critical' : (componentKey === 'units' ? newTotal : item.units) === item.threshold ? 'low' : 'safe';
-                return { ...item, [componentKey]: newTotal, status };
-              }
-            }
-            return item;
-          });
-
-          const auditLogId = 'LOG-' + Math.floor(100 + Math.random() * 900);
-          const newAuditLog = {
-            logId: auditLogId,
-            userId: state.authSystemUser?.id || 'USR-004',
-            action: `Recorded Blood Unit ${newUnit.unitId} (${newUnit.componentId}, ${newUnit.bloodTypeId})`,
-            module: 'Blood Bank',
-            recordId: newUnit.unitId,
-            oldValue: null,
-            newValue: JSON.stringify(newUnit),
-            performedAt: new Date().toLocaleString()
-          };
-
-          return {
-            bloodInventory: [newUnit, ...state.bloodInventory],
-            inventory: newInventory,
-            auditLogs: [newAuditLog, ...state.auditLogs]
-          };
+          return { bloodInventory: [newUnit, ...state.bloodInventory] };
         });
       },
 
@@ -1977,9 +1929,10 @@ export const useBloodStore = create(
     }),
     {
       name: 'bloodlink-dvo-store',
-      version: 13,
-      migrate: () => {
-        return undefined;
+      version: 15,
+      migrate: (persistedState) => {
+        // v15: both inventory and bloodInventory are now DB-driven — wipe stale sample data
+        return { ...persistedState, bloodInventory: [], inventory: [] };
       }
     }
   )

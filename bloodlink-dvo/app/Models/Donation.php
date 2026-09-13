@@ -9,7 +9,7 @@ class Donation extends Model
     protected $primaryKey = 'donation_id';
 
     protected $fillable = [
-        'donor_id', 'event_id', 'donation_date',
+        'donor_id', 'event_id', 'donation_date', 'serial_number',
         'screening_outcome', 'deferral_reason', 'deferral_end_date', 'recorded_by',
     ];
 

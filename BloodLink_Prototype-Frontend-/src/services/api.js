@@ -281,3 +281,17 @@ export async function apiCreateBloodIssuance(data) {
 export async function apiApproveBloodRelease(issuanceId, data = {}) {
   return request(`/blood-issuances/${issuanceId}/release`, { method: 'PUT', body: JSON.stringify(data) });
 }
+
+// ─── Blood Inventory endpoints ────────────────────────────────────────────
+
+export async function apiGetBloodInventory() {
+  return request('/blood-inventory');
+}
+
+export async function apiCreateBloodInventory(data) {
+  return request('/blood-inventory', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiUpdateBloodInventoryStatus(id, data) {
+  return request(`/blood-inventory/${id}/status`, { method: 'PUT', body: JSON.stringify(data) });
+}

@@ -119,6 +119,7 @@ export default function RegistryDashboard() {
     donorName: '',
     eventId: '',
     donationDate: new Date().toISOString().slice(0, 10),
+    serialNumber: '',
     // Step 2  -  results
     hemoglobinResult: '14.5',
     bloodTypeConfirmed: 'O+',
@@ -1064,6 +1065,13 @@ export default function RegistryDashboard() {
                       donorName: '',
                       eventId: '',
                       donationDate: new Date().toISOString().slice(0, 10),
+                      // Auto-generate a preview serial number (YYYY-NNNN)
+                      // The server will generate the authoritative one; this is just a visual preview
+                      serialNumber: (() => {
+                        const year = new Date().getFullYear();
+                        const next = (labTestResults?.length ?? 0) + 1;
+                        return `${year}-${String(next).padStart(4, '0')}`;
+                      })(),
                       hemoglobinResult: '14.5',
                       bloodTypeConfirmed: 'O+',
                       hbsagResult: 'Non-Reactive',
@@ -1110,6 +1118,13 @@ export default function RegistryDashboard() {
                             <div>
                               <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Test ID</span>
                               <span className="font-mono font-bold text-slate-800 text-xs">{res.testId}</span>
+                            </div>
+                            <div className="w-px h-6 bg-slate-200" />
+                            <div>
+                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Serial No.</span>
+                              <span className="font-mono font-bold text-indigo-700 text-xs bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">
+                                {res.serialNumber || '—'}
+                              </span>
                             </div>
                             <div className="w-px h-6 bg-slate-200" />
                             <div>
@@ -1550,6 +1565,25 @@ export default function RegistryDashboard() {
                       value={labForm.donationDate}
                       onChange={e => setLabForm(prev => ({ ...prev, donationDate: e.target.value }))}
                     />
+                  </div>
+
+                  {/* Serial / Segment Number — spans full width */}
+                  <div className="col-span-2">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                      Serial / Segment No. <span className="text-indigo-400 font-normal normal-case tracking-normal">(auto-generated — editable)</span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="e.g. 2026-0001"
+                        className="w-full border border-indigo-200 bg-indigo-50/40 rounded-lg px-3 py-2 text-xs font-mono font-bold text-indigo-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                        value={labForm.serialNumber}
+                        onChange={e => setLabForm(prev => ({ ...prev, serialNumber: e.target.value }))}
+                      />
+                    </div>
+                    <p className="text-[9px] text-slate-400 mt-1 leading-relaxed">
+                      This number links the donor to blood components in inventory. The server assigns the final number — override only if the physical bag has a pre-printed serial.
+                    </p>
                   </div>
                 </div>
               </div>
