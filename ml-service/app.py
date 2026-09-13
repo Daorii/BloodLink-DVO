@@ -13,6 +13,7 @@ import sys
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import joblib
+import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -140,23 +141,64 @@ def historical():
 
     weeks = min(int(request.args.get('weeks', 8)), 52)  # max 52 weeks of history
 
-    # Get the last `weeks` unique trend_index values (most recent weeks in CSV)
+    # -- Step 1: Get last `weeks` of CSV data ----------------------------------
     sorted_trends = sorted(df_csv['trend_index'].unique())
     last_trends   = sorted_trends[-weeks:]
-
     df_hist = df_csv[df_csv['trend_index'].isin(last_trends)].copy()
+    df_hist['source'] = 'csv'
 
-    # -- Overview: sum ALL groups per week ------------------------------------
+    # -- Step 2: Try to fetch real issuances from Laravel API ------------------
+    real_rows = []
+    try:
+        resp = requests.get('http://localhost:8000/api/ml/training-data', timeout=5)
+        if resp.status_code == 200:
+            records = resp.json().get('records', [])
+            if records:
+                df_real = pd.DataFrame(records)
+                df_real['source'] = 'real'
+                # Only include records that have all required columns
+                required = ['hospital_id', 'blood_type', 'component_type', 'quantity_issued', 'trend_index']
+                if all(c in df_real.columns for c in required):
+                    df_real['hospital_id'] = df_real['hospital_id'].astype(str)
+                    real_rows = df_real
+    except Exception:
+        pass  # Laravel not reachable, use CSV only
+
+    # -- Step 3: If real data exists, replace the most recent week(s) ----------
+    if len(real_rows) > 0:
+        # Group real data by (hospital_id, blood_type, component_type) and sum
+        # Treat all real records as "week 9" (most recent actual week)
+        # so they appear at the RIGHT side of the historical chart
+        real_agg = real_rows.groupby(['hospital_id', 'blood_type', 'component_type'])['quantity_issued'].sum().reset_index()
+        real_agg['trend_index'] = sorted_trends[-1] + 1  # next trend after CSV
+        real_agg['week_start_date'] = datetime.now().strftime('%d/%m/%Y')
+        real_agg['source'] = 'real'
+
+        # Use last (weeks-1) CSV weeks + 1 real week
+        last_trends = sorted_trends[-(weeks - 1):]
+        df_hist     = df_csv[df_csv['trend_index'].isin(last_trends)].copy()
+        df_hist['source'] = 'csv'
+
+        # Combine with real data as the final week
+        all_trends  = list(last_trends) + [real_agg['trend_index'].iloc[0]]
+        df_combined = pd.concat([df_hist, real_agg], ignore_index=True)
+    else:
+        all_trends  = list(last_trends)
+        df_combined = df_hist
+
+    # -- Overview: sum ALL groups per week (CSV + real) -----------------------
     overview_rows = []
-    for i, trend in enumerate(last_trends):
-        week_data   = df_hist[df_hist['trend_index'] == trend]
+    for i, trend in enumerate(all_trends):
+        week_data   = df_combined[df_combined['trend_index'] == trend]
         total       = float(week_data['quantity_issued'].sum())
         week_date   = week_data['week_start_date'].iloc[0] if 'week_start_date' in week_data.columns and len(week_data) else ''
+        is_real     = bool(week_data['source'].eq('real').any()) if 'source' in week_data.columns else False
         overview_rows.append({
             'weekIndex':     i + 1,
             'label':         f'Wk {i + 1}',
             'weekStartDate': week_date,
             'totalDemand':   round(total, 2),
+            'isRealData':    is_real,
         })
 
     # -- By group: per hospital x blood_type x component ----------------------
@@ -166,7 +208,7 @@ def historical():
         h_name = hospital['hospital_name']
         hosp_id = make_hosp_id(h_id)
 
-        df_h = df_hist[df_hist['hospital_id'] == h_id]
+        df_h = df_combined[df_combined['hospital_id'] == h_id]
 
         for bt in blood_types:
             df_bt = df_h[df_h['blood_type'] == bt]
@@ -175,15 +217,17 @@ def historical():
                 df_g = df_bt[df_bt['component_type'] == comp]
 
                 week_rows = []
-                for i, trend in enumerate(last_trends):
+                for i, trend in enumerate(all_trends):
                     week_data = df_g[df_g['trend_index'] == trend]
                     demand    = float(week_data['quantity_issued'].sum()) if len(week_data) else 0.0
                     week_date = week_data['week_start_date'].iloc[0] if len(week_data) and 'week_start_date' in week_data.columns else ''
+                    is_real   = bool(week_data['source'].eq('real').any()) if 'source' in week_data.columns and len(week_data) else False
                     week_rows.append({
                         'weekIndex':     i + 1,
                         'label':         f'Wk {i + 1}',
                         'weekStartDate': week_date,
                         'demand':        round(demand, 2),
+                        'isRealData':    is_real,
                     })
 
                 by_group.append({
