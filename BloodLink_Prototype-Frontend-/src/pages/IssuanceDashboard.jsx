@@ -102,10 +102,11 @@ export default function IssuanceDashboard() {
   } = useBloodStore();
 
   // ── Forecast filter states ──
-  const [fcHospital,  setFcHospital]  = useState('ALL');
-  const [fcBloodType, setFcBloodType] = useState('ALL');
-  const [fcComponent, setFcComponent] = useState('ALL');
-  const [fcWeeks,     setFcWeeks]     = useState(4);
+  const [fcHospital,       setFcHospital]       = useState('ALL');
+  const [fcBloodType,      setFcBloodType]      = useState('ALL');
+  const [fcComponent,      setFcComponent]      = useState('ALL');
+  const [fcWeeks,          setFcWeeks]          = useState(4);
+  const [chartClickedPoint, setChartClickedPoint] = useState(null);
 
   const BLOOD_TYPE_LIST = ['O+','O-','A+','A-','B+','B-','AB+','AB-'];
   const COMP_LIST = ['PRBC','Platelet Concentrate','FFP','Cryoprecipitate','Cryosupernate'];
@@ -1871,7 +1872,8 @@ export default function IssuanceDashboard() {
                             }
                           </h3>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            Wk 1–8 = historical actual issuances (aggregated) | Wk 9+ = REMA predictions with ±8% confidence band
+                            Wk 1–8 = historical actual issuances (aggregated) | Wk 9+ = MLR predictions with ±8% confidence band
+                            {chartClickedPoint && <span className="ml-2 text-indigo-600 font-semibold cursor-pointer hover:underline" onClick={() => setChartClickedPoint(null)}>· Clear analysis ×</span>}
                           </p>
                         </div>
                         <div className="flex items-center gap-4 text-[10px] text-slate-500 font-semibold flex-shrink-0 ml-4">
@@ -1880,9 +1882,16 @@ export default function IssuanceDashboard() {
                           <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 bg-slate-300 inline-block rounded"></span>Confidence</span>
                         </div>
                       </div>
+                      <p className="text-[10px] text-slate-400 mb-2 italic">💡 Click on any data point to see an interpretation.</p>
                       <div className="h-80 w-full">
                         <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={activeChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+                          <LineChart data={activeChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
+                            onClick={(chartData) => {
+                              if (chartData && chartData.activePayload && chartData.activePayload.length) {
+                                const point = chartData.activePayload[0].payload;
+                                setChartClickedPoint(point);
+                              }
+                            }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                             <XAxis dataKey="label" stroke="#94a3b8" fontSize={10} tick={{ fontFamily: 'monospace' }} />
                             <YAxis stroke="#94a3b8" fontSize={10} />
@@ -1893,10 +1902,75 @@ export default function IssuanceDashboard() {
                             <Line type="monotone" dataKey="upper" stroke="#e2e8f0" strokeWidth={1.5} strokeDasharray="5 5" name="Upper Bound" dot={false} connectNulls />
                             <Line type="monotone" dataKey="lower" stroke="#e2e8f0" strokeWidth={1.5} strokeDasharray="5 5" name="Lower Bound" dot={false} connectNulls />
                             <Line type="monotone" dataKey="actual" stroke="#10B981" strokeWidth={3} name="Actual (Historical)" dot={{ r: 4, fill: '#10B981' }} connectNulls />
-                            <Line type="monotone" dataKey="predicted" stroke="#4F46E5" strokeWidth={3} name="REMA Prediction" dot={{ r: 4, fill: '#4F46E5' }} connectNulls strokeDasharray={isOverview ? undefined : "6 3"} />
+                            <Line type="monotone" dataKey="predicted" stroke="#4F46E5" strokeWidth={3} name="MLR Prediction" dot={{ r: 4, fill: '#4F46E5' }} connectNulls strokeDasharray={isOverview ? undefined : "6 3"} />
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
+
+                      {/* ── Click Analysis Panel ── */}
+                      {chartClickedPoint && (() => {
+                        const pt = chartClickedPoint;
+                        const isActual    = pt.actual !== null && pt.actual !== undefined;
+                        const isPredicted = pt.predicted !== null && pt.predicted !== undefined;
+                        const val         = isActual ? pt.actual : pt.predicted;
+                        const type        = isActual ? 'historical' : 'predicted';
+                        const upper       = pt.upper ?? Math.round(val * 1.08);
+                        const lower       = pt.lower ?? Math.max(0, Math.round(val * 0.92));
+
+                        // Determine demand level
+                        const allPredicted = activeChartData.filter(d => d.predicted).map(d => d.predicted);
+                        const avgPred = allPredicted.length ? allPredicted.reduce((a,b) => a+b,0)/allPredicted.length : val;
+                        const demandLevel = val > avgPred * 1.15 ? 'High' : val < avgPred * 0.85 ? 'Low' : 'Normal';
+                        const demandColor = demandLevel === 'High' ? 'text-rose-700 bg-rose-50 border-rose-200'
+                                          : demandLevel === 'Low'  ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                          : 'text-amber-700 bg-amber-50 border-amber-200';
+
+                        // Generate interpretation text
+                        const contextLabel = fcHospital !== 'ALL'
+                          ? hospitals.find(h => h.id === fcHospital)?.name?.split('(')[0].trim()
+                          : 'all hospitals combined';
+                        const btLabel  = fcBloodType !== 'ALL' ? `${fcBloodType} blood` : 'all blood types';
+                        const compLabel = fcComponent !== 'ALL' ? fcComponent : 'all components';
+
+                        const interpretation = isActual
+                          ? `During ${pt.label}, the actual recorded demand was ${val} units of ${btLabel} (${compLabel}) across ${contextLabel}. ` +
+                            (demandLevel === 'High'
+                              ? `This was above average, suggesting elevated patient need or increased hospital activity during this period. Blood bank staff should review what drove this spike to anticipate future occurrences.`
+                              : demandLevel === 'Low'
+                              ? `This was below average, which may indicate lower patient admissions, seasonal slowdown, or improved efficiency in blood utilization. This is a positive sign for inventory levels.`
+                              : `This reflects a normal, steady demand level — consistent with expected weekly consumption patterns. No unusual intervention is required.`)
+                          : `The MLR model predicts a demand of ${val} units for ${pt.label}, with a confidence range of ${lower}–${upper} units. ` +
+                            (demandLevel === 'High'
+                              ? `This forecast signals elevated anticipated need. The blood bank should prepare ${upper} units as a buffer and consider running a distribution recommendation for this component before the week begins.`
+                              : demandLevel === 'Low'
+                              ? `Demand is forecasted to be lower than average this week. This provides an opportunity to reduce stock rotation risk by fulfilling existing requests from older inventory first.`
+                              : `Demand is forecasted to remain at a steady, manageable level. Routine issuance operations should be sufficient without requiring additional stock mobilization.`);
+
+                        return (
+                          <div className="mt-4 border border-indigo-100 bg-indigo-50/60 rounded-xl p-4 animate-fadeIn">
+                            <div className="flex items-start gap-3">
+                              <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0 text-lg">
+                                {isActual ? '📈' : '🔮'}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap mb-1">
+                                  <span className="font-bold text-indigo-900 text-sm">{pt.label} Analysis</span>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${demandColor}`}>{demandLevel} Demand</span>
+                                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{type}</span>
+                                </div>
+                                <p className="text-xs text-slate-700 leading-relaxed">{interpretation}</p>
+                                {isPredicted && (
+                                  <div className="mt-2 flex items-center gap-4 text-[10px] text-slate-500">
+                                    <span>📉 Lower bound: <strong className="text-slate-700">{lower} units</strong></span>
+                                    <span>📈 Upper bound: <strong className="text-slate-700">{upper} units</strong></span>
+                                    <span>🎯 Point estimate: <strong className="text-indigo-700">{val} units</strong></span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
 
