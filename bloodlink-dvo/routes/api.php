@@ -10,6 +10,7 @@ use App\Http\Controllers\DonorController;
 use App\Http\Controllers\HospitalController;
 use App\Http\Controllers\DonorRecallController;
 use App\Http\Controllers\LabTestResultController;
+use App\Http\Controllers\MLForecastController;
 use App\Http\Controllers\UserController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -92,4 +93,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/blood-issuances', [BloodIssuanceController::class, 'index']);
     Route::post('/blood-issuances', [BloodIssuanceController::class, 'store']);
     Route::put('/blood-issuances/{id}/release', [BloodIssuanceController::class, 'release']);
+
+    // ML Forecast Service (proxies to Python Flask on port 5001)
+    Route::get('/ml/health',      [MLForecastController::class, 'health']);
+    Route::get('/ml/model-info',  [MLForecastController::class, 'modelInfo']);
+    Route::post('/ml/predict',    [MLForecastController::class, 'predict']);
 });

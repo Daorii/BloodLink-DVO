@@ -931,165 +931,129 @@ export const useBloodStore = create(
       //      where X = [1, week, hospScale, compWeight] — these vary ACROSS groups
       //   3. For each group, predict future weeks using the learned global coefficients + MA4 blending
       //   NOTE: Per-group matrices with constant X2/X3 are SINGULAR → that's why the old approach crashed.
-      generateGranularForecast: (weeksAhead = 4) => {
-        const { hospitals, inventory } = get();
+      generateGranularForecast: async (weeksAhead = 4) => {
+        const { hospitals, authToken } = get();
+
+        // ── Try real Python MLR service first ─────────────────────────────
+        try {
+          const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/api/ml/predict`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+            },
+            body: JSON.stringify({ weeks_ahead: weeksAhead }),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            // Map ML service output → granularForecasts format
+            const BASE_WEEK = new Date();
+            let seq = 1;
+            const results = (data.predictions || []).map(p => {
+              const weekDate = new Date(BASE_WEEK);
+              weekDate.setDate(weekDate.getDate() + p.weeksAhead * 7);
+
+              // Match hospitalId: ML returns 'HOSP-001', store uses h.id
+              const hosp = hospitals.find(h =>
+                h.id === p.hospitalId ||
+                `HOSP-${String(h.id).replace('HOSP-', '').padStart(3, '0')}` === p.hospitalId ||
+                h.name === p.hospitalName
+              );
+
+              return {
+                forecastId:       seq++,
+                hospitalId:       hosp?.id ?? p.hospitalId,
+                hospitalName:     p.hospitalName,
+                bloodTypeId:      p.bloodTypeId,
+                componentId:      p.componentId,
+                forecastWeek:     weekDate.toISOString().slice(0, 10),
+                forecastWeekLabel:`Wk ${p.weeksAhead}`,
+                predictedDemand:  p.predictedDemand,
+                upperBound:       Math.round(p.predictedDemand * 1.08),
+                lowerBound:       Math.max(0, Math.round(p.predictedDemand * 0.92)),
+                generatedAt:      data.metadata?.generatedAt ?? new Date().toISOString(),
+                weeksAhead:       p.weeksAhead,
+                mlSource:         'python-mlr',
+                mlMetrics:        data.metadata ?? {},
+              };
+            });
+
+            set({ granularForecasts: results });
+            console.log(`[MLR] Loaded ${results.length} forecasts from Python service (R²=${data.metadata?.r2_test ?? '?'})`);
+            return;
+          }
+        } catch (err) {
+          console.warn('[MLR] Python ML service unavailable — falling back to JS simulation.', err?.message);
+        }
+
+        // ── Fallback: JS MLR simulation (original implementation) ──────────
+        const { inventory } = get();
         const BLOOD_TYPES = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
-        const COMPONENTS = ['PRBC', 'Platelet Concentrate', 'FFP', 'Cryoprecipitate', 'Cryosupernate'];
+        const COMPONENTS  = ['PRBC', 'Platelet Concentrate', 'FFP', 'Cryoprecipitate', 'Cryosupernate'];
+        const BASE_WEEK   = new Date('2026-05-05');
+        const RARITY = { 'O+': 1.0, 'A+': 0.8, 'B+': 0.7, 'AB+': 0.3, 'O-': 0.6, 'A-': 0.4, 'B-': 0.2, 'AB-': 0.1 };
+        const COMP_W = { 'PRBC': 1.0, 'Platelet Concentrate': 0.6, 'FFP': 0.5, 'Cryoprecipitate': 0.3, 'Cryosupernate': 0.2 };
+        const HOSP_S = { 'Government': 1.5, 'Blood Bank': 1.2 };
 
-        const BASE_WEEK = new Date('2026-05-05');
-
-        // ── Matrix helper functions ─────────────────────────────────────────
-        const matTranspose = (M) => {
-          const rows = M.length, cols = M[0].length;
-          const R = Array.from({ length: cols }, () => Array(rows).fill(0));
-          for (let r = 0; r < rows; r++)
-            for (let c = 0; c < cols; c++)
-              R[c][r] = M[r][c];
-          return R;
-        };
-
-        const matMultiply = (A, B) => {
-          const rA = A.length, cA = A[0].length, cB = B[0].length;
-          const R = Array.from({ length: rA }, () => Array(cB).fill(0));
-          for (let r = 0; r < rA; r++)
-            for (let c = 0; c < cB; c++)
-              for (let k = 0; k < cA; k++)
-                R[r][c] += A[r][k] * B[k][c];
-          return R;
-        };
-
-        const matInvert = (M) => {
-          const n = M.length;
-          const A = M.map(row => [...row]);
-          const I = Array.from({ length: n }, (_, i) =>
-            Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))
-          );
+        const matTranspose = M => M[0].map((_, c) => M.map(r => r[c]));
+        const matMultiply  = (A, B) => A.map(rA => B[0].map((_, cB) => rA.reduce((s, v, k) => s + v * B[k][cB], 0)));
+        const matInvert    = M => {
+          const n = M.length, A = M.map(r => [...r]);
+          const I = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => +(i === j)));
           for (let i = 0; i < n; i++) {
-            let maxEl = Math.abs(A[i][i]), maxRow = i;
-            for (let k = i + 1; k < n; k++)
-              if (Math.abs(A[k][i]) > maxEl) { maxEl = Math.abs(A[k][i]); maxRow = k; }
-            [A[i], A[maxRow]] = [A[maxRow], A[i]];
-            [I[i], I[maxRow]] = [I[maxRow], I[i]];
+            let mR = i;
+            for (let k = i+1; k < n; k++) if (Math.abs(A[k][i]) > Math.abs(A[mR][i])) mR = k;
+            [A[i], A[mR]] = [A[mR], A[i]]; [I[i], I[mR]] = [I[mR], I[i]];
             const d = A[i][i] || 1e-12;
-            for (let k = 0; k < n; k++) { A[i][k] /= d; I[i][k] /= d; }
-            for (let h = 0; h < n; h++) {
-              if (h !== i) {
-                const f = A[h][i];
-                for (let k = 0; k < n; k++) { A[h][k] -= f * A[i][k]; I[h][k] -= f * I[i][k]; }
-              }
+            A[i] = A[i].map(v => v/d); I[i] = I[i].map(v => v/d);
+            for (let h = 0; h < n; h++) if (h !== i) {
+              const f = A[h][i];
+              A[h] = A[h].map((v, k) => v - f * A[i][k]);
+              I[h] = I[h].map((v, k) => v - f * I[i][k]);
             }
           }
           return I;
         };
 
-        // ── Step 1: Build GLOBAL observation dataset ────────────────────────
-        // Each row: [hospScale, compWeight, rarityFactor, weekIdx] → actual demand
-        const RARITY = { 'O+': 1.0, 'A+': 0.8, 'B+': 0.7, 'AB+': 0.3, 'O-': 0.6, 'A-': 0.4, 'B-': 0.2, 'AB-': 0.1 };
-        const COMP_W = { 'PRBC': 1.0, 'Platelet Concentrate': 0.6, 'FFP': 0.5, 'Cryoprecipitate': 0.3, 'Cryosupernate': 0.2 };
-        const HOSP_S = { 'Government': 1.5, 'Blood Bank': 1.2 };
-
-        // Collect all groups' historical data
         const groups = [];
         hospitals.forEach(hosp => {
           BLOOD_TYPES.forEach(bt => {
-            const inv = inventory.find(i => i.type === bt);
-            if (!inv) return;
+            if (!inventory.find(i => i.type === bt)) return;
             COMPONENTS.forEach(comp => {
-              const rarityFactor = RARITY[bt] || 0.5;
-              const compFactor = COMP_W[comp] || 0.5;
+              const rarityFactor = RARITY[bt] || 0.5, compFactor = COMP_W[comp] || 0.5;
               const hospFactor = HOSP_S[hosp.type] || 1.0;
               const baseDemand = Math.round(8 * rarityFactor * compFactor * hospFactor);
-              if (baseDemand === 0) return;
-
-              const hospScale = HOSP_S[hosp.type] || 1.0;
-              const compWeight = COMP_W[comp] || 0.5;
-
-              const historicalWeeks = [];
-              for (let w = 0; w < 8; w++) {
-                const weekDate = new Date(BASE_WEEK);
-                weekDate.setDate(weekDate.getDate() + w * 7);
-                const noise = Math.round((Math.random() - 0.4) * baseDemand * 0.3);
-                historicalWeeks.push({
-                  week: w,
-                  date: weekDate.toISOString().slice(0, 10),
-                  actual: Math.max(0, baseDemand + noise)
-                });
-              }
-
-              groups.push({ hosp, bt, comp, hospScale, compWeight, historicalWeeks });
+              if (!baseDemand) return;
+              const historicalWeeks = Array.from({ length: 8 }, (_, w) => {
+                const d = new Date(BASE_WEEK); d.setDate(d.getDate() + w * 7);
+                return { week: w, date: d.toISOString().slice(0, 10), actual: Math.max(0, baseDemand + Math.round((Math.random() - 0.4) * baseDemand * 0.3)) };
+              });
+              groups.push({ hosp, bt, comp, hospScale: HOSP_S[hosp.type] || 1.0, compWeight: COMP_W[comp] || 0.5, historicalWeeks });
             });
           });
         });
 
-        // ── Step 2: Build GLOBAL X and Y matrices (across ALL groups × weeks) ──
-        // X columns: [1 (intercept), weekIdx, hospScale, compWeight]
-        // This ensures X2 and X3 vary across rows → X^T X is non-singular
-        const globalX = [];
-        const globalY = [];
-        groups.forEach(({ hospScale, compWeight, historicalWeeks }) => {
-          historicalWeeks.forEach(({ week, actual }) => {
-            globalX.push([1, week, hospScale, compWeight]);
-            globalY.push([actual]);
-          });
-        });
+        const gX = [], gY = [];
+        groups.forEach(({ hospScale, compWeight, historicalWeeks }) =>
+          historicalWeeks.forEach(({ week, actual }) => { gX.push([1, week, hospScale, compWeight]); gY.push([actual]); })
+        );
+        let b0=0, b1=0, b2=0, b3=0;
+        try { const XT = matTranspose(gX), beta = matMultiply(matMultiply(matInvert(matMultiply(XT, gX)), XT), gY); [b0,b1,b2,b3] = [0,1,2,3].map(i => isFinite(beta[i][0]) ? beta[i][0] : 0); } catch (_) {}
 
-        // ── Step 3: Solve global MLR: beta = (X^T X)^-1 X^T Y ──────────────
-        let b0 = 0, b1 = 0, b2 = 0, b3 = 0;
-        try {
-          const XT = matTranspose(globalX);
-          const XTX = matMultiply(XT, globalX);
-          const XTXinv = matInvert(XTX);
-          const XTY = matMultiply(XT, globalY);
-          const beta = matMultiply(XTXinv, XTY);
-          b0 = isFinite(beta[0][0]) ? beta[0][0] : 0;
-          b1 = isFinite(beta[1][0]) ? beta[1][0] : 0;
-          b2 = isFinite(beta[2][0]) ? beta[2][0] : 0;
-          b3 = isFinite(beta[3][0]) ? beta[3][0] : 0;
-        } catch (_) {
-          // Fallback: coefficients remain 0, predictions rely on MA4 only
-        }
-
-        // ── Step 4: Generate predictions per group ───────────────────────────
-        const results = [];
-        let forecastIdSeq = 1;
-
+        const results = []; let fid = 1;
         groups.forEach(({ hosp, bt, comp, hospScale, compWeight, historicalWeeks }) => {
-          // MA4 on last 4 weeks for smoothing
-          const maLast = historicalWeeks.slice(-4)
-            .reduce((sum, w) => sum + w.actual, 0) / 4;
-
+          const maLast = historicalWeeks.slice(-4).reduce((s, w) => s + w.actual, 0) / 4;
           for (let i = 1; i <= weeksAhead; i++) {
-            const weekDate = new Date(BASE_WEEK);
-            weekDate.setDate(weekDate.getDate() + (8 + i - 1) * 7);
-
-            // MLR prediction: y = b0 + b1*weekIdx + b2*hospScale + b3*compWeight
-            const weekIdx = 8 + i - 1;
-            const mlrPred = b0 + b1 * weekIdx + b2 * hospScale + b3 * compWeight;
-            // Blend MLR (70%) with MA4 (30%) for stability
-            const predicted = Math.max(0, Math.round(0.7 * mlrPred + 0.3 * maLast));
+            const wd = new Date(BASE_WEEK); wd.setDate(wd.getDate() + (8+i-1)*7);
+            const predicted = Math.max(0, Math.round(0.7*(b0+b1*(8+i-1)+b2*hospScale+b3*compWeight) + 0.3*maLast));
             const margin = Math.max(1, Math.round(predicted * 0.08));
-
-            results.push({
-              forecastId: forecastIdSeq++,
-              hospitalId: hosp.id,
-              hospitalName: hosp.name,
-              bloodTypeId: bt,
-              componentId: comp,
-              forecastWeek: weekDate.toISOString().slice(0, 10),
-              forecastWeekLabel: `Wk ${8 + i}`,
-              predictedDemand: predicted,
-              upperBound: predicted + margin,
-              lowerBound: Math.max(0, predicted - margin),
-              generatedAt: new Date().toISOString(),
-              historicalWeeks,
-              mlrCoefficients: { b0: +b0.toFixed(3), b1: +b1.toFixed(3), b2: +b2.toFixed(3), b3: +b3.toFixed(3) },
-              maLast: +maLast.toFixed(1),
-              weeksAhead: i,
-            });
+            results.push({ forecastId: fid++, hospitalId: hosp.id, hospitalName: hosp.name, bloodTypeId: bt, componentId: comp, forecastWeek: wd.toISOString().slice(0, 10), forecastWeekLabel: `Wk ${8+i}`, predictedDemand: predicted, upperBound: predicted+margin, lowerBound: Math.max(0, predicted-margin), generatedAt: new Date().toISOString(), historicalWeeks, mlrCoefficients: { b0: +b0.toFixed(3), b1: +b1.toFixed(3), b2: +b2.toFixed(3), b3: +b3.toFixed(3) }, maLast: +maLast.toFixed(1), weeksAhead: i, mlSource: 'js-simulation' });
           }
         });
-
         set({ granularForecasts: results });
+        console.warn('[MLR] Using JS simulation fallback.');
       },
 
       // ─── Donor Registration ─────────────────────────────────────────────
