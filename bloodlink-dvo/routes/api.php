@@ -28,6 +28,9 @@ Route::options('/{any}', function () {
     return response('', 204);
 })->where('any', '.*');
 
+// ML training data export — public (called by Python train.py, no browser auth)
+Route::get('/ml/training-data', [MLForecastController::class, 'trainingData']);
+
 // ── Public (no auth required) ───────────────────────────────────────────
 Route::post('/login', [AuthController::class, 'login']);
 
@@ -95,7 +98,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/blood-issuances/{id}/release', [BloodIssuanceController::class, 'release']);
 
     // ML Forecast Service (proxies to Python Flask on port 5001)
-    Route::get('/ml/health',      [MLForecastController::class, 'health']);
-    Route::get('/ml/model-info',  [MLForecastController::class, 'modelInfo']);
-    Route::post('/ml/predict',    [MLForecastController::class, 'predict']);
+    Route::get('/ml/health',         [MLForecastController::class, 'health']);
+    Route::get('/ml/model-info',     [MLForecastController::class, 'modelInfo']);
+    Route::post('/ml/predict',       [MLForecastController::class, 'predict']);
 });
