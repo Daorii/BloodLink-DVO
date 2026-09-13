@@ -937,48 +937,54 @@ export const useBloodStore = create(
 
         // ── Try real Python MLR service first ─────────────────────────────
         try {
-          const res = await fetch('http://localhost:8000/api/ml/predict', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-              ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-            },
-            body: JSON.stringify({ weeks_ahead: weeksAhead }),
-          });
+          // Fetch predictions AND real historical data in parallel
+          const [predRes, histRes] = await Promise.all([
+            fetch('http://localhost:8000/api/ml/predict', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+              },
+              body: JSON.stringify({ weeks_ahead: weeksAhead }),
+            }),
+            fetch('http://localhost:5001/historical?weeks=8'),
+          ]);
 
-          if (res.ok) {
-            const data = await res.json();
-            // Map ML service output → granularForecasts format
+          if (predRes.ok) {
+            const data    = await predRes.json();
+            // Real CSV historical data (null-safe if /historical fails)
+            const histData = histRes.ok ? await histRes.json() : null;
+
+            // Build lookup: groupKey -> real historical weeks array from CSV
+            const groupHistMap = {};
+            if (histData?.byGroup) {
+              histData.byGroup.forEach(g => {
+                const key = `${g.hospitalId}|${g.bloodTypeId}|${g.componentId}`;
+                groupHistMap[key] = g.weeks.map(w => ({
+                  week:   w.weekIndex - 1,
+                  date:   w.weekStartDate,
+                  actual: w.demand,
+                }));
+              });
+            }
+
             const BASE_WEEK = new Date();
             let seq = 1;
-            // Build a lookup: groupKey -> week1 predictedDemand (used as historical baseline)
-            const groupBaseline = {};
-            (data.predictions || []).forEach(p => {
-              if (p.weeksAhead === 1) {
-                groupBaseline[`${p.hospitalId}|${p.bloodTypeId}|${p.componentId}`] = p.predictedDemand;
-              }
-            });
 
             const results = (data.predictions || []).map(p => {
               const weekDate = new Date(BASE_WEEK);
               weekDate.setDate(weekDate.getDate() + p.weeksAhead * 7);
 
-              // Match hospitalId: ML returns 'HOSP-001', store uses h.id
               const hosp = hospitals.find(h =>
                 h.id === p.hospitalId ||
                 `HOSP-${String(h.id).replace('HOSP-', '').padStart(3, '0')}` === p.hospitalId ||
                 h.name === p.hospitalName
               );
 
-              // Generate 8 weeks of plausible historical data using predicted as baseline
-              const baseline = groupBaseline[`${p.hospitalId}|${p.bloodTypeId}|${p.componentId}`] ?? p.predictedDemand;
-              const historicalWeeks = Array.from({ length: 8 }, (_, w) => {
-                const d = new Date(BASE_WEEK);
-                d.setDate(d.getDate() - (8 - w) * 7);
-                const noise = Math.round((Math.random() - 0.45) * baseline * 0.25);
-                return { week: w, date: d.toISOString().slice(0, 10), actual: Math.max(0, Math.round(baseline + noise)) };
-              });
+              // Use REAL CSV historical weeks; fallback to empty array
+              const groupKey = `${p.hospitalId}|${p.bloodTypeId}|${p.componentId}`;
+              const historicalWeeks = groupHistMap[groupKey] || [];
 
               return {
                 forecastId:       seq++,
@@ -998,6 +1004,7 @@ export const useBloodStore = create(
                 mlMetrics:        data.metadata ?? {},
               };
             });
+
 
             set({ granularForecasts: results });
             console.log(`[MLR] Loaded ${results.length} forecasts from Python service (R²=${data.metadata?.r2_test ?? '?'})`);

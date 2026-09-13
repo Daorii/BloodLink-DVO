@@ -24,6 +24,7 @@ CORS(app)
 
 # -- Load Model ----------------------------------------------------------------
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'model.pkl')
+CSV_PATH   = os.path.join(os.path.dirname(__file__), 'data', 'BloodLink_Hospital_Demand_Dataset.csv')
 artifact   = None
 
 try:
@@ -38,6 +39,15 @@ try:
 except FileNotFoundError:
     print("[BloodLink ML] WARNING: model.pkl not found. Run train.py first.")
     pipeline = None
+
+# -- Load CSV for historical data ----------------------------------------------
+df_csv = None
+try:
+    df_csv = pd.read_csv(CSV_PATH)
+    df_csv['hospital_id'] = df_csv['hospital_id'].astype(str)
+    print(f"[BloodLink ML] CSV loaded -- {len(df_csv)} rows for historical data")
+except Exception as e:
+    print(f"[BloodLink ML] WARNING: Could not load CSV for historical data: {e}")
 
 
 # -- Helpers -------------------------------------------------------------------
@@ -93,6 +103,102 @@ def model_info():
             for h in hospitals
         ],
         'approach': 'Global MLR with One-Hot Encoded categorical features',
+    })
+
+
+@app.route('/historical', methods=['GET'])
+def historical():
+    """
+    GET /historical?weeks=8
+    Returns REAL weekly aggregated demand from the CSV training data.
+    Used by the frontend to display the green (historical actual) chart line.
+
+    Response shape:
+    {
+      "weeks": 8,
+      "overview": [                          # summed across ALL groups per week
+        { "weekIndex": 1, "label": "Wk 1", "weekStartDate": "...", "totalDemand": 158 },
+        ...
+      ],
+      "byGroup": [                           # per hospital x blood_type x component
+        {
+          "hospitalId": "HOSP-001",
+          "hospitalName": "...",
+          "bloodTypeId": "A+",
+          "componentId": "PRBC",
+          "weeks": [
+            { "weekIndex": 1, "label": "Wk 1", "weekStartDate": "...", "demand": 7 },
+            ...
+          ]
+        },
+        ...
+      ]
+    }
+    """
+    if df_csv is None:
+        return jsonify({'error': 'CSV data not loaded.'}), 503
+
+    weeks = min(int(request.args.get('weeks', 8)), 52)  # max 52 weeks of history
+
+    # Get the last `weeks` unique trend_index values (most recent weeks in CSV)
+    sorted_trends = sorted(df_csv['trend_index'].unique())
+    last_trends   = sorted_trends[-weeks:]
+
+    df_hist = df_csv[df_csv['trend_index'].isin(last_trends)].copy()
+
+    # -- Overview: sum ALL groups per week ------------------------------------
+    overview_rows = []
+    for i, trend in enumerate(last_trends):
+        week_data   = df_hist[df_hist['trend_index'] == trend]
+        total       = float(week_data['quantity_issued'].sum())
+        week_date   = week_data['week_start_date'].iloc[0] if 'week_start_date' in week_data.columns and len(week_data) else ''
+        overview_rows.append({
+            'weekIndex':     i + 1,
+            'label':         f'Wk {i + 1}',
+            'weekStartDate': week_date,
+            'totalDemand':   round(total, 2),
+        })
+
+    # -- By group: per hospital x blood_type x component ----------------------
+    by_group = []
+    for hospital in hospitals:
+        h_id   = str(hospital['hospital_id'])
+        h_name = hospital['hospital_name']
+        hosp_id = make_hosp_id(h_id)
+
+        df_h = df_hist[df_hist['hospital_id'] == h_id]
+
+        for bt in blood_types:
+            df_bt = df_h[df_h['blood_type'] == bt]
+
+            for comp in components:
+                df_g = df_bt[df_bt['component_type'] == comp]
+
+                week_rows = []
+                for i, trend in enumerate(last_trends):
+                    week_data = df_g[df_g['trend_index'] == trend]
+                    demand    = float(week_data['quantity_issued'].sum()) if len(week_data) else 0.0
+                    week_date = week_data['week_start_date'].iloc[0] if len(week_data) and 'week_start_date' in week_data.columns else ''
+                    week_rows.append({
+                        'weekIndex':     i + 1,
+                        'label':         f'Wk {i + 1}',
+                        'weekStartDate': week_date,
+                        'demand':        round(demand, 2),
+                    })
+
+                by_group.append({
+                    'hospitalId':   hosp_id,
+                    'hospitalName': h_name,
+                    'bloodTypeId':  bt,
+                    'componentId':  comp,
+                    'weeks':        week_rows,
+                })
+
+    return jsonify({
+        'weeks':    weeks,
+        'source':   'csv_training_data',
+        'overview': overview_rows,
+        'byGroup':  by_group,
     })
 
 
