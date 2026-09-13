@@ -1883,15 +1883,9 @@ export default function IssuanceDashboard() {
                         </div>
                       </div>
                       <p className="text-[10px] text-slate-400 mb-2 italic">💡 Click on any data point to see an interpretation.</p>
-                      <div className="h-80 w-full">
+                      <div className="h-80 w-full cursor-pointer">
                         <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={activeChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
-                            onClick={(chartData) => {
-                              if (chartData && chartData.activePayload && chartData.activePayload.length) {
-                                const point = chartData.activePayload[0].payload;
-                                setChartClickedPoint(point);
-                              }
-                            }}>
+                          <LineChart data={activeChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                             <XAxis dataKey="label" stroke="#94a3b8" fontSize={10} tick={{ fontFamily: 'monospace' }} />
                             <YAxis stroke="#94a3b8" fontSize={10} />
@@ -1901,8 +1895,18 @@ export default function IssuanceDashboard() {
                             />
                             <Line type="monotone" dataKey="upper" stroke="#e2e8f0" strokeWidth={1.5} strokeDasharray="5 5" name="Upper Bound" dot={false} connectNulls />
                             <Line type="monotone" dataKey="lower" stroke="#e2e8f0" strokeWidth={1.5} strokeDasharray="5 5" name="Lower Bound" dot={false} connectNulls />
-                            <Line type="monotone" dataKey="actual" stroke="#10B981" strokeWidth={3} name="Actual (Historical)" dot={{ r: 4, fill: '#10B981' }} connectNulls />
-                            <Line type="monotone" dataKey="predicted" stroke="#4F46E5" strokeWidth={3} name="MLR Prediction" dot={{ r: 4, fill: '#4F46E5' }} connectNulls strokeDasharray={isOverview ? undefined : "6 3"} />
+                            <Line type="monotone" dataKey="actual" stroke="#10B981" strokeWidth={3} name="Actual (Historical)"
+                              dot={{ r: 5, fill: '#10B981', cursor: 'pointer' }}
+                              activeDot={{ r: 7, fill: '#10B981', stroke: '#fff', strokeWidth: 2, cursor: 'pointer',
+                                onClick: (event, payload) => { if (payload?.payload) setChartClickedPoint(payload.payload); }
+                              }}
+                              connectNulls />
+                            <Line type="monotone" dataKey="predicted" stroke="#4F46E5" strokeWidth={3} name="MLR Prediction"
+                              dot={{ r: 5, fill: '#4F46E5', cursor: 'pointer' }}
+                              activeDot={{ r: 7, fill: '#4F46E5', stroke: '#fff', strokeWidth: 2, cursor: 'pointer',
+                                onClick: (event, payload) => { if (payload?.payload) setChartClickedPoint(payload.payload); }
+                              }}
+                              connectNulls strokeDasharray={isOverview ? undefined : "6 3"} />
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
