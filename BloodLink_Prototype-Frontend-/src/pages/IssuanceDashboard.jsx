@@ -1861,6 +1861,129 @@ export default function IssuanceDashboard() {
                       </div>
                     </div>
 
+                    {/* ── DEMAND VS INVENTORY GAP ANALYSIS ── */}
+                    {hasData && (() => {
+                      const BLOOD_TYPES = ['O+','O-','A+','A-','B+','B-','AB+','AB-'];
+                      const COMPONENTS  = ['PRBC','Platelet Concentrate','FFP','Cryoprecipitate','Cryosupernate'];
+
+                      // Count available units per blood_type + component from live inventory
+                      const availMap = {};
+                      (bloodInventory || []).forEach(u => {
+                        if (u.inventoryStatus !== 'Available' && u.inventory_status !== 'Available') return;
+                        const bt   = u.bloodType   || u.blood_type  || '';
+                        const comp = u.component   || u.componentType || '';
+                        const key  = `${bt}|${comp}`;
+                        availMap[key] = (availMap[key] || 0) + 1;
+                      });
+
+                      // Sum predicted demand (week 1) per blood_type + component across all hospitals
+                      const demandMap = {};
+                      gf.filter(f => f.weeksAhead === 1).forEach(f => {
+                        const key = `${f.bloodTypeId}|${f.componentId}`;
+                        demandMap[key] = (demandMap[key] || 0) + f.predictedDemand;
+                      });
+
+                      // Build gap rows
+                      const gapRows = [];
+                      BLOOD_TYPES.forEach(bt => {
+                        COMPONENTS.forEach(comp => {
+                          const key     = `${bt}|${comp}`;
+                          const demand  = Math.round(demandMap[key] || 0);
+                          const avail   = availMap[key] || 0;
+                          if (demand === 0 && avail === 0) return;
+                          const gap     = avail - demand;
+                          const ratio   = demand > 0 ? avail / demand : 1;
+                          const status  = gap < 0 ? 'Shortfall' : ratio < 1.2 ? 'Low Buffer' : 'Sufficient';
+                          gapRows.push({ bt, comp, demand, avail, gap, status });
+                        });
+                      });
+
+                      // Sort: Shortfall first, then Low Buffer, then Sufficient
+                      const order = { Shortfall: 0, 'Low Buffer': 1, Sufficient: 2 };
+                      gapRows.sort((a, b) => order[a.status] - order[b.status] || a.gap - b.gap);
+
+                      const shortfalls  = gapRows.filter(r => r.status === 'Shortfall').length;
+                      const lowBuffers  = gapRows.filter(r => r.status === 'Low Buffer').length;
+                      const sufficients = gapRows.filter(r => r.status === 'Sufficient').length;
+
+                      return (
+                        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                            <div>
+                              <h3 className="font-bold text-slate-900 text-sm tracking-tight">⚖️ Demand vs Inventory Gap Analysis</h3>
+                              <p className="text-xs text-slate-500 mt-0.5">Next-week predicted demand vs current available stock — helps identify shortfalls before they happen</p>
+                            </div>
+                            <div className="flex items-center gap-3 text-[10px] font-bold flex-shrink-0">
+                              {shortfalls > 0 && <span className="bg-rose-100 text-rose-700 border border-rose-200 px-2 py-1 rounded-full">{shortfalls} Shortfall{shortfalls > 1 ? 's' : ''}</span>}
+                              {lowBuffers > 0 && <span className="bg-amber-100 text-amber-700 border border-amber-200 px-2 py-1 rounded-full">{lowBuffers} Low Buffer</span>}
+                              {sufficients > 0 && <span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-full">{sufficients} Sufficient</span>}
+                            </div>
+                          </div>
+
+                          {gapRows.length === 0 ? (
+                            <div className="px-6 py-8 text-center text-slate-400 text-sm">
+                              Run the forecast first to see demand vs inventory comparison.
+                            </div>
+                          ) : (
+                            <div className="divide-y divide-slate-50">
+                              {/* Header */}
+                              <div className="grid grid-cols-12 px-6 py-2 bg-slate-50 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                <span className="col-span-2">Blood Type</span>
+                                <span className="col-span-3">Component</span>
+                                <span className="col-span-2 text-right">Predicted Demand</span>
+                                <span className="col-span-2 text-right">Available Stock</span>
+                                <span className="col-span-2 text-right">Gap</span>
+                                <span className="col-span-1 text-right">Status</span>
+                              </div>
+                              {gapRows.map(({ bt, comp, demand, avail, gap, status }) => {
+                                const isShortfall  = status === 'Shortfall';
+                                const isLowBuffer  = status === 'Low Buffer';
+                                const rowBg  = isShortfall ? 'bg-rose-50/60 hover:bg-rose-50' : isLowBuffer ? 'bg-amber-50/40 hover:bg-amber-50' : 'hover:bg-slate-50';
+                                const gapColor = isShortfall ? 'text-rose-700 font-bold' : isLowBuffer ? 'text-amber-700 font-bold' : 'text-emerald-700';
+                                const badge  = isShortfall
+                                  ? 'bg-rose-100 text-rose-700 border-rose-200'
+                                  : isLowBuffer
+                                  ? 'bg-amber-100 text-amber-700 border-amber-200'
+                                  : 'bg-emerald-100 text-emerald-700 border-emerald-200';
+                                const barPct = demand > 0 ? Math.min((avail / demand) * 100, 100) : 100;
+                                const barColor = isShortfall ? 'bg-rose-400' : isLowBuffer ? 'bg-amber-400' : 'bg-emerald-400';
+                                return (
+                                  <div key={`${bt}|${comp}`} className={`grid grid-cols-12 px-6 py-3 items-center transition text-xs ${rowBg}`}>
+                                    <span className="col-span-2 font-bold text-slate-800 font-mono">{bt}</span>
+                                    <span className="col-span-3 text-slate-600">{comp}</span>
+                                    <span className="col-span-2 text-right font-mono text-slate-700">{demand} units</span>
+                                    <div className="col-span-2 flex flex-col items-end gap-1">
+                                      <span className="font-mono text-slate-700">{avail} units</span>
+                                      <div className="w-16 h-1 bg-slate-200 rounded-full overflow-hidden">
+                                        <div className={`h-full ${barColor} rounded-full transition-all`} style={{ width: `${barPct}%` }} />
+                                      </div>
+                                    </div>
+                                    <span className={`col-span-2 text-right font-mono ${gapColor}`}>
+                                      {gap >= 0 ? `+${gap}` : gap} units
+                                    </span>
+                                    <span className="col-span-1 flex justify-end">
+                                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badge} whitespace-nowrap`}>
+                                        {status === 'Shortfall' ? '🔴' : status === 'Low Buffer' ? '🟡' : '🟢'} {status}
+                                      </span>
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {shortfalls > 0 && (
+                            <div className="px-6 py-3 bg-rose-50 border-t border-rose-100">
+                              <p className="text-xs text-rose-700 font-semibold">
+                                ⚠️ {shortfalls} blood type/component combination{shortfalls > 1 ? 's are' : ' is'} projected to run short next week.
+                                Consider initiating a procurement drive or requesting transfers from partner facilities.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     {/* Main Chart */}
                     <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
                       <div className="flex items-start justify-between mb-4">
