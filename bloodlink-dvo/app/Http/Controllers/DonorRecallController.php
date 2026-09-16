@@ -6,12 +6,72 @@ use App\Models\Donor;
 use App\Models\DonorRecall;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class DonorRecallController extends Controller
 {
     /**
+     * Send an SMS via Infobip.
+     * PH format: strip leading 0, prepend 63 → e.g. 09665624874 → 639665624874
+     */
+    private function sendSMS(string $phone, string $message): bool
+    {
+        $apiKey  = env('INFOBIP_API_KEY');
+        $baseUrl = env('INFOBIP_BASE_URL');
+
+        if (!$apiKey || !$baseUrl) {
+            Log::warning('Infobip credentials not set — SMS skipped.');
+            return false;
+        }
+
+        // Normalise to international format (63XXXXXXXXX)
+        $phone = preg_replace('/[\s\-\+]/', '', $phone);
+        if (str_starts_with($phone, '0')) {
+            $phone = '63' . substr($phone, 1);
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => 'App ' . $apiKey,
+                'Content-Type'  => 'application/json',
+                'Accept'        => 'application/json',
+            ])->post("https://{$baseUrl}/sms/2/text/single", [
+                'from' => 'BloodLink',
+                'to'   => $phone,
+                'text' => $message,
+            ]);
+
+            if ($response->successful()) {
+                Log::info("Infobip SMS sent to {$phone}");
+                return true;
+            }
+
+            Log::error("Infobip error ({$response->status()}): " . $response->body());
+            return false;
+
+        } catch (\Throwable $e) {
+            Log::error("Infobip exception: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Build the personalised recall SMS for a donor.
+     */
+    private function buildMessage(Donor $donor): string
+    {
+        $firstName = $donor->first_name ?? 'Donor';
+        return "Hi {$firstName}! BloodLink from SNBC-DVO is reaching out. "
+             . "You are now eligible to donate blood again — it has been over 90 days since your last donation. "
+             . "Your blood can save lives! Please visit the Southern Philippines Medical Center Blood Bank "
+             . "(SNBC-DVO) at your earliest convenience. Thank you for your generosity!";
+    }
+
+    // ── Endpoints ─────────────────────────────────────────────────────────
+
+    /**
      * GET /api/recalls
-     * Returns all recall records, newest first.
      */
     public function index(): JsonResponse
     {
@@ -27,9 +87,7 @@ class DonorRecallController extends Controller
 
     /**
      * POST /api/recalls
-     * Trigger a single SMS recall for one donor.
-     *
-     * Body: { donor_id, recall_reason? }
+     * Single donor recall.
      */
     public function store(Request $request): JsonResponse
     {
@@ -38,26 +96,31 @@ class DonorRecallController extends Controller
             'recall_reason' => 'nullable|string|max:100',
         ]);
 
+        $donor   = Donor::findOrFail($v['donor_id']);
+        $message = $this->buildMessage($donor);
+        $sent    = $this->sendSMS($donor->contact_number ?? '', $message);
+
         $recall = DonorRecall::create([
-            'donor_id'      => $v['donor_id'],
-            'recall_date'   => now()->toDateString(),
-            'sms_status'    => 'Sent',      // simulated — no real SMS gateway
-            'donor_response'=> null,
-            'recall_reason' => $v['recall_reason'] ?? 'Critical Shortage Match',
-            'processed_by'  => $request->user()?->user_id,
+            'donor_id'       => $v['donor_id'],
+            'recall_date'    => now()->toDateString(),
+            'sms_status'     => $sent ? 'Sent' : 'Failed',
+            'donor_response' => null,
+            'recall_reason'  => $v['recall_reason'] ?? 'Critical Shortage Match',
+            'processed_by'   => $request->user()?->user_id,
         ]);
 
         return response()->json([
             'recall'  => $this->format($recall->load('donor')),
-            'message' => 'Recall SMS sent successfully.',
+            'message' => $sent
+                ? 'Recall SMS sent successfully.'
+                : 'Recall logged but SMS delivery failed — check logs.',
+            'smsSent' => $sent,
         ], 201);
     }
 
     /**
      * POST /api/recalls/bulk
-     * Trigger SMS recalls for multiple donors at once.
-     *
-     * Body: { donor_ids: [1, 2, 3], recall_reason? }
+     * Bulk recall for multiple donors.
      */
     public function bulk(Request $request): JsonResponse
     {
@@ -67,35 +130,41 @@ class DonorRecallController extends Controller
             'recall_reason' => 'nullable|string|max:100',
         ]);
 
-        $today  = now()->toDateString();
-        $userId = $request->user()?->user_id;
-        $reason = $v['recall_reason'] ?? 'Critical Shortage Match';
+        $today     = now()->toDateString();
+        $userId    = $request->user()?->user_id;
+        $reason    = $v['recall_reason'] ?? 'Critical Shortage Match';
+        $created   = [];
+        $sentCount = 0;
 
-        $created = [];
         foreach ($v['donor_ids'] as $donorId) {
+            $donor   = Donor::findOrFail($donorId);
+            $message = $this->buildMessage($donor);
+            $sent    = $this->sendSMS($donor->contact_number ?? '', $message);
+
             $recall = DonorRecall::create([
                 'donor_id'       => $donorId,
                 'recall_date'    => $today,
-                'sms_status'     => 'Sent',
+                'sms_status'     => $sent ? 'Sent' : 'Failed',
                 'donor_response' => null,
                 'recall_reason'  => $reason,
                 'processed_by'   => $userId,
             ]);
+
             $created[] = $this->format($recall->load('donor'));
+            if ($sent) $sentCount++;
         }
 
         return response()->json([
             'recalls' => $created,
             'count'   => count($created),
-            'message' => count($created) . ' recall SMS messages sent.',
+            'sent'    => $sentCount,
+            'failed'  => count($created) - $sentCount,
+            'message' => "{$sentCount} of " . count($created) . " recall SMS messages sent successfully.",
         ], 201);
     }
 
     /**
      * PUT /api/recalls/{id}/response
-     * Update donor_response and/or sms_status after follow-up.
-     *
-     * Body: { donor_response?, sms_status? }
      */
     public function updateResponse(Request $request, int $id): JsonResponse
     {
@@ -114,9 +183,6 @@ class DonorRecallController extends Controller
         ]);
     }
 
-    /**
-     * Format a DonorRecall for the API response.
-     */
     private function format(DonorRecall $r): array
     {
         return [

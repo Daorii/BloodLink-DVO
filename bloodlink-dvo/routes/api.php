@@ -69,6 +69,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Donations / Record Outcomes
     Route::get('/donations', [DonationController::class, 'index']);
     Route::post('/donations', [DonationController::class, 'store']);
+    Route::get('/donations/by-serial/{serial}', [DonationController::class, 'findBySerial']);
     Route::put('/donations/{id}/outcome', [DonationController::class, 'updateOutcome']);
 
     // Lab Test Results

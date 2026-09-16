@@ -38,7 +38,7 @@ const ITEMS_PER_PAGE = 5;
 const DEFAULT_HEALTH = [true, true, true, true, true];
 
 export default function RegistryDashboard() {
-  const { donors, inventory, addDonor, updateDonorMedical, donationEvents, authSystemUser, labTestResults, donations, recalls, addLabTestResult, isSidebarCollapsed, toggleSidebar, fetchDonorsFromAPI, fetchDonationEventsFromAPI, fetchDonationsFromAPI, fetchLabResultsFromAPI, fetchRecallsFromAPI, dispatchRecallSMS, dispatchBulkRecallSMS } = useBloodStore();
+  const { donors, inventory, bloodInventory, addDonor, updateDonorMedical, donationEvents, authSystemUser, labTestResults, donations, recalls, addLabTestResult, recordDonation, isSidebarCollapsed, toggleSidebar, fetchDonorsFromAPI, fetchDonationEventsFromAPI, fetchDonationsFromAPI, fetchLabResultsFromAPI, fetchRecallsFromAPI, fetchBloodInventoryFromAPI, dispatchRecallSMS, dispatchBulkRecallSMS } = useBloodStore();
 
   // Dynamically prepare donor lastDonation dates relative to today's date for demo purposes
   const preparedDonors = useMemo(() => {
@@ -65,6 +65,7 @@ export default function RegistryDashboard() {
   // Pagination states
   const [registryPage, setRegistryPage] = useState(1);
   const [recallPage, setRecallPage] = useState(1);
+  const [labPage, setLabPage] = useState(1);
 
   // Add Donor Drawer State
   const [showDrawer, setShowDrawer] = useState(false);
@@ -114,22 +115,11 @@ export default function RegistryDashboard() {
   const [labSaved, setLabSaved] = useState(false);
   const [labDonationSearchQuery, setLabDonationSearchQuery] = useState('');
   const [labForm, setLabForm] = useState({
-    // Step 1  -  who and when
     donorId: '',
     donorName: '',
     eventId: '',
     donationDate: new Date().toISOString().slice(0, 10),
-    serialNumber: '',
-    // Step 2  -  results
-    hemoglobinResult: '14.5',
-    bloodTypeConfirmed: 'O+',
-    hbsagResult: 'Non-Reactive',
-    syphilisResult: 'Non-Reactive',
-    hivResult: 'Non-Reactive',
-    hcvResult: 'Non-Reactive',
-    malariaResult: 'Non-Reactive',
-    natResult: 'Non-Reactive',
-    othersResult: ''
+    serialNumber: '',        // typed manually from the physical DHQ form
   });
 
   const [medicalForm, setMedicalForm] = useState({
@@ -163,6 +153,7 @@ export default function RegistryDashboard() {
     fetchDonationsFromAPI();
     fetchLabResultsFromAPI();
     fetchRecallsFromAPI();
+    fetchBloodInventoryFromAPI();
   }, []);
 
   useEffect(() => {
@@ -199,18 +190,19 @@ export default function RegistryDashboard() {
     e.preventDefault();
     const fullName = `${newDonorForm.firstName} ${newDonorForm.middleName ? newDonorForm.middleName + ' ' : ''}${newDonorForm.lastName}`.trim();
     
-    // Duplicate check: check if donor with same full name or phone/email exists
-    const isDuplicate = donors.some(d => 
-      (d.name && d.name.toLowerCase() === fullName.toLowerCase()) ||
-      (newDonorForm.phone && (d.phone === newDonorForm.phone || d.contactNumber === newDonorForm.phone)) ||
-      (newDonorForm.email && d.email && d.email.toLowerCase() === newDonorForm.email.toLowerCase())
-    );
+    // Duplicate check: same full name AND same date of birth = true duplicate.
+    // Phone/email alone are NOT reliable identifiers (family members share phones).
+    const isDuplicate = donors.some(d => {
+      const nameMatch = d.name && d.name.toLowerCase() === fullName.toLowerCase();
+      const dobMatch  = newDonorForm.dob && (d.dob === newDonorForm.dob || d.birthDate === newDonorForm.dob);
+      return nameMatch && dobMatch;
+    });
 
     if (isDuplicate) {
       setNoticeModal({
         isOpen: true,
         title: 'Duplicate Entry Detected',
-        message: `A donor with the name "${fullName}" or contact information already exists in the system registry. Please verify the donor record to prevent duplicate entries.`,
+        message: `A donor named "${fullName}" with the same date of birth is already registered in the system. Please verify the existing record before adding a new one.`,
         variant: 'danger'
       });
       return;
@@ -278,15 +270,36 @@ export default function RegistryDashboard() {
 
   const totalRegistryPages = Math.max(1, Math.ceil(filteredDonors.length / ITEMS_PER_PAGE));
 
+  // Donation Records tab pagination
+  const allDonations       = donations || [];
+  const totalLabPages      = Math.max(1, Math.ceil(allDonations.length / ITEMS_PER_PAGE));
+  const labStart           = (labPage - 1) * ITEMS_PER_PAGE;
+  const pagedDonations     = allDonations.slice(labStart, labStart + ITEMS_PER_PAGE);
+
   // Donor Recall Logic
+  // Determine critical blood types from real API inventory (Available PRBC units by blood type)
+  const SAFE_THRESHOLD_RECALL = { 'O+': 50, 'O-': 100, 'A+': 50, 'A-': 50, 'B+': 50, 'B-': 50, 'AB+': 50, 'AB-': 50 };
+  const EMERGENCY_RESERVED_RECALL = { 'O+': 10, 'O-': 10, 'A+': 10, 'A-': 10, 'B+': 10, 'B-': 10, 'AB+': 5, 'AB-': 5 };
+
   const criticalBloodTypes = useMemo(() => {
-    return inventory.filter(i => i.status === 'critical').map(i => i.type);
-  }, [inventory]);
+    // Count Available PRBC units per blood type from the real inventory
+    const counts = {};
+    (bloodInventory || []).filter(u => u.inventoryStatus === 'Available' && u.component === 'PRBC').forEach(u => {
+      const bt = u.bloodType ?? u.bloodTypeId;
+      if (bt) counts[bt] = (counts[bt] || 0) + 1;
+    });
+    // A blood type is "critical" if PRBC count is below safe threshold
+    return Object.entries(SAFE_THRESHOLD_RECALL)
+      .filter(([bt, safe]) => (counts[bt] || 0) < safe)
+      .map(([bt]) => bt);
+  }, [bloodInventory]);
 
   const recallDonors = useMemo(() => {
-    return preparedDonors.filter(d => {
-      return d.lastDonation && d.status !== 'Deferred' && criticalBloodTypes.includes(d.bloodType);
-    });
+    // Show all eligible donors when no specific critical type is detected,
+    // otherwise filter to donors whose blood type matches a critical type
+    const eligible = preparedDonors.filter(d => d.lastDonation && d.status !== 'Deferred');
+    if (criticalBloodTypes.length === 0) return eligible;
+    return eligible.filter(d => criticalBloodTypes.includes(d.bloodType));
   }, [preparedDonors, criticalBloodTypes]);
 
   // Filtered recall donors (search + blood type filter)
@@ -454,10 +467,10 @@ export default function RegistryDashboard() {
               <button
                 onClick={() => setTab('laboratory')}
                 className={`w-full text-left nav-link ${tab === 'laboratory' ? 'active' : ''}`}
-                title={isSidebarCollapsed ? "Laboratory Results" : ""}
+                title={isSidebarCollapsed ? "Donation Records" : ""}
               >
                 <Droplets className="nav-icon" />
-                <span className="sidebar-copy">Laboratory Results</span>
+                <span className="sidebar-copy">Donation Records</span>
               </button>
             </nav>
           </div>
@@ -634,29 +647,7 @@ export default function RegistryDashboard() {
                               >
                                 <Eye className="w-3.5 h-3.5" /> View
                               </button>
-                              <button
-                                onClick={() => {
-                                  const donorNumId = parseInt(String(donor.id ?? '').replace(/^D0*/i, ''), 10);
-                                  // Reliable check: the API returns hasLabResult on every donation record
-                                  const hasLab = (donations || []).some(d => {
-                                    const dDonorId = parseInt(String(d.donorId ?? d.donor_id ?? ''), 10);
-                                    return dDonorId === donorNumId && d.hasLabResult === true;
-                                  });
-                                  if (!hasLab) {
-                                    setNoticeModal({
-                                      isOpen: true,
-                                      title: 'No Lab Results Yet',
-                                      message: 'Lab results must be recorded first under the Laboratory Results tab before setting a screening outcome for this donor.',
-                                      variant: 'warning'
-                                    });
-                                    return;
-                                  }
-                                  setEditingMedicalDonor(donor);
-                                }}
-                                className="bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
-                              >
-                                <Stethoscope className="w-3.5 h-3.5" /> Record Outcomes
-                              </button>
+
                             </div>
                           </td>
                         </tr>
@@ -1054,9 +1045,9 @@ export default function RegistryDashboard() {
                 <div>
                   <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
                     <Droplets size={16} className="text-indigo-600" />
-                    Laboratory Test Results  -  Table 8
+                    Donation Records
                   </h3>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Manage and encode lab-confirmed blood types and serology TTI test outcomes</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Donations recorded by Registry — serial numbers and screening status</p>
                 </div>
                 <button
                   onClick={() => {
@@ -1065,126 +1056,110 @@ export default function RegistryDashboard() {
                       donorName: '',
                       eventId: '',
                       donationDate: new Date().toISOString().slice(0, 10),
-                      // Auto-generate a preview serial number (YYYY-NNNN)
-                      // The server will generate the authoritative one; this is just a visual preview
-                      serialNumber: (() => {
-                        const year = new Date().getFullYear();
-                        const next = (labTestResults?.length ?? 0) + 1;
-                        return `${year}-${String(next).padStart(4, '0')}`;
-                      })(),
-                      hemoglobinResult: '14.5',
-                      bloodTypeConfirmed: 'O+',
-                      hbsagResult: 'Non-Reactive',
-                      syphilisResult: 'Non-Reactive',
-                      hivResult: 'Non-Reactive',
-                      hcvResult: 'Non-Reactive',
-                      malariaResult: 'Non-Reactive',
-                      natResult: 'Non-Reactive',
-                      othersResult: ''
+                      serialNumber: '',   // staff types this from the physical DHQ
                     });
                     setLabSaved(false);
                     setShowLabResultModal(true);
                   }}
                   className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer"
                 >
-                  <Plus size={13} /> Encode Lab Result
+                  <Plus size={13} /> Record Donation
                 </button>
               </div>
 
               {/* Lab results cards */}
               <div className="space-y-2">
-                {(labTestResults || []).length === 0 ? (
+                {(donations || []).length === 0 ? (
                   <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-slate-400 shadow-sm">
                     <Droplets className="w-8 h-8 mx-auto mb-2 opacity-20" />
-                    <p className="text-xs font-semibold">No lab results encoded yet.</p>
-                    <p className="text-[10px] mt-1">Click <strong>Encode Lab Result</strong> to add the first record.</p>
+                    <p className="text-xs font-semibold">No donation records yet.</p>
+                    <p className="text-[10px] mt-1">Click <strong>Record Donation</strong> to add the first record.</p>
                   </div>
                 ) : (
-                  (labTestResults || []).map((res) => {
-                    const ttiTests = [
-                      { name: 'HBsAg',    val: res.hbsagResult    ?? res.hbsag_result },
-                      { name: 'Syphilis', val: res.syphilisResult  ?? res.syphilis_result },
-                      { name: 'HIV',      val: res.hivResult       ?? res.hiv_result },
-                      { name: 'HCV',      val: res.hcvResult       ?? res.hcv_result },
-                      { name: 'Malaria',  val: res.malariaResult   ?? res.malaria_result },
-                      { name: 'NAT',      val: res.natResult       ?? res.nat_result },
-                    ];
-                    const hasReactive = ttiTests.some(t => t.val === 'Reactive');
-                    return (
-                      <div key={res.testId} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden hover:border-slate-300 transition-colors">
-                        {/* Card header */}
-                        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/60">
-                          <div className="flex items-center gap-4 flex-wrap">
-                            <div>
-                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Test ID</span>
-                              <span className="font-mono font-bold text-slate-800 text-xs">{res.testId}</span>
-                            </div>
-                            <div className="w-px h-6 bg-slate-200" />
-                            <div>
-                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Serial No.</span>
-                              <span className="font-mono font-bold text-indigo-700 text-xs bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">
-                                {res.serialNumber || '—'}
-                              </span>
-                            </div>
-                            <div className="w-px h-6 bg-slate-200" />
-                            <div>
-                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Donor</span>
-                              <span className="font-semibold text-slate-700 text-xs">{res.donorName || '-'}</span>
-                            </div>
-                            <div className="w-px h-6 bg-slate-200" />
-                            <div>
-                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Donation</span>
-                              <span className="font-mono text-slate-600 text-xs">DON-{String(res.donationId ?? res.donation_id ?? '').padStart(3,'0')}</span>
-                            </div>
-                            <div className="w-px h-6 bg-slate-200" />
-                            <div>
-                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Blood Type</span>
-                              <span className="bg-rose-50 border border-rose-100 text-[#C21C24] font-black rounded px-2 py-0.5 text-[10px] font-mono">
-                                {res.bloodTypeConfirmed ?? res.blood_type_confirmed ?? '-'}
-                              </span>
-                            </div>
-                            <div className="w-px h-6 bg-slate-200" />
-                            <div>
-                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Hemoglobin</span>
-                              <span className="font-mono font-semibold text-slate-700 text-xs">{res.hemoglobinResult ?? res.hemoglobin_result ?? '-'} g/dL</span>
+                    <>
+                      {pagedDonations.map((don) => {
+                        const hasLab = don.hasLabResult;
+                        const outcome = don.screeningOutcome ?? don.screening_outcome;
+                        return (
+                          <div key={don.donationId || don.donation_id} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden hover:border-slate-300 transition-colors">
+                            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/60">
+                              <div className="flex items-center gap-4 flex-wrap">
+                                <div>
+                                  <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Donation ID</span>
+                                  <span className="font-mono font-bold text-slate-800 text-xs">{don.donationId}</span>
+                                </div>
+                                <div className="w-px h-6 bg-slate-200" />
+                                <div>
+                                  <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Serial No.</span>
+                                  <span className="font-mono font-bold text-indigo-700 text-xs bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">
+                                    {don.serialNumber || '—'}
+                                  </span>
+                                </div>
+                                <div className="w-px h-6 bg-slate-200" />
+                                <div>
+                                  <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Donor</span>
+                                  <span className="font-semibold text-slate-700 text-xs">{don.donorName || '—'}</span>
+                                </div>
+                                <div className="w-px h-6 bg-slate-200" />
+                                <div>
+                                  <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Event</span>
+                                  <span className="font-mono text-slate-600 text-xs">{don.eventId || '—'}</span>
+                                </div>
+                                <div className="w-px h-6 bg-slate-200" />
+                                <div>
+                                  <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Date</span>
+                                  <span className="font-mono text-slate-600 text-xs">{don.donationDate || '—'}</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {outcome && (
+                                  <span className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider border ${
+                                    outcome === 'Accepted'
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      : 'bg-rose-50 text-rose-700 border-rose-200'
+                                  }`}>
+                                    {outcome}
+                                  </span>
+                                )}
+                                <span className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider border ${
+                                  hasLab
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                                }`}>
+                                  {hasLab ? '✓ Lab Done' : '⏳ Pending Lab'}
+                                </span>
+                              </div>
                             </div>
                           </div>
-                          <span className={`px-3 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider border ${
-                            hasReactive
-                              ? 'bg-rose-50 text-rose-700 border-rose-200'
-                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          }`}>
-                            {hasReactive ? '! Reactive' : 'All Non-Reactive'}
+                        );
+                      })}
+                      {/* Donation Records Pagination */}
+                      {allDonations.length > ITEMS_PER_PAGE && (
+                        <div className="bg-slate-50 px-6 py-3.5 border border-slate-200 rounded-xl flex items-center justify-between text-xs font-semibold text-slate-500">
+                          <span>
+                            Showing {Math.min(allDonations.length, labStart + 1)} to{' '}
+                            {Math.min(allDonations.length, labStart + ITEMS_PER_PAGE)} of {allDonations.length} records
                           </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setLabPage(p => Math.max(1, p - 1))}
+                              disabled={labPage === 1}
+                              className="p-1 border border-slate-200 rounded hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent transition-colors cursor-pointer"
+                            >
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <span className="text-slate-700 font-bold">Page {labPage} of {totalLabPages}</span>
+                            <button
+                              onClick={() => setLabPage(p => Math.min(totalLabPages, p + 1))}
+                              disabled={labPage === totalLabPages}
+                              className="p-1 border border-slate-200 rounded hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent transition-colors cursor-pointer"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
-                        {/* TTI pills row */}
-                        <div className="px-5 py-3 flex items-center gap-2 flex-wrap">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mr-1">TTI Screen:</span>
-                          {ttiTests.map(t => (
-                            <span key={t.name} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border ${
-                              t.val === 'Reactive'
-                                ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                : t.val
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                : 'bg-slate-50 text-slate-400 border-slate-200'
-                            }`}>
-                              <span className="text-[9px] font-normal opacity-60">{t.name}</span>
-                              <span className="font-extrabold">{t.val === 'Reactive' ? 'R' : t.val ? 'NR' : '-'}</span>
-                            </span>
-                          ))}
-                          {res.othersResult && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border bg-slate-50 text-slate-500 border-slate-200">
-                              <span className="text-[9px] font-normal opacity-60">Others</span>
-                              <span>{res.othersResult}</span>
-                            </span>
-                          )}
-                          <span className="ml-auto text-[9px] text-slate-400 font-mono">
-                            Encoded: {res.createdAt ? new Date(res.createdAt).toLocaleDateString() : '-'}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })
+                      )}
+                    </>
                 )}
               </div>
 
@@ -1424,7 +1399,7 @@ export default function RegistryDashboard() {
                   <Droplets className="w-4 h-4 text-indigo-600" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-900 text-sm">Encode Lab Result</h3>
+                  <h3 className="font-bold text-slate-900 text-sm">Record Donation</h3>
                   <p className="text-[10px] text-slate-400 font-semibold">Section II â€“ Table 8 Serology & Blood Typing</p>
                 </div>
               </div>
@@ -1570,7 +1545,7 @@ export default function RegistryDashboard() {
                   {/* Serial / Segment Number — spans full width */}
                   <div className="col-span-2">
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                      Serial / Segment No. <span className="text-indigo-400 font-normal normal-case tracking-normal">(auto-generated — editable)</span>
+                      Serial / Segment No. <span className="text-rose-400">*</span> <span className="text-indigo-400 font-normal normal-case tracking-normal">(from the physical DHQ form)</span>
                     </label>
                     <div className="flex items-center gap-2">
                       <input
@@ -1582,83 +1557,17 @@ export default function RegistryDashboard() {
                       />
                     </div>
                     <p className="text-[9px] text-slate-400 mt-1 leading-relaxed">
-                      This number links the donor to blood components in inventory. The server assigns the final number — override only if the physical bag has a pre-printed serial.
+                      Enter the serial number printed on the DHQ form. This is the unique identifier Serology uses to record lab results.
                     </p>
                   </div>
                 </div>
               </div>
 
-              <hr className="border-slate-100" />
 
-              {/* Step 2 â€“ Lab Results */}
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Step 2 â€” Lab Results</p>
-                <div className="grid grid-cols-2 gap-3">
 
-                  {/* Blood Type Confirmed */}
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Blood Type (Confirmed)</label>
-                    <select
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                      value={labForm.bloodTypeConfirmed}
-                      onChange={e => setLabForm(prev => ({ ...prev, bloodTypeConfirmed: e.target.value }))}
-                    >
-                      {['O+','O-','A+','A-','B+','B-','AB+','AB-'].map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-
-                  {/* Hemoglobin */}
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Hemoglobin (g/dL)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                      value={labForm.hemoglobinResult}
-                      onChange={e => setLabForm(prev => ({ ...prev, hemoglobinResult: e.target.value }))}
-                    />
-                  </div>
-
-                  {/* TTI Tests */}
-                  {[
-                    { label: 'HBsAg', key: 'hbsagResult' },
-                    { label: 'Syphilis', key: 'syphilisResult' },
-                    { label: 'HIV', key: 'hivResult' },
-                    { label: 'HCV', key: 'hcvResult' },
-                    { label: 'Malaria', key: 'malariaResult' },
-                    { label: 'NAT', key: 'natResult' },
-                  ].map(({ label, key }) => (
-                    <div key={key}>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">{label}</label>
-                      <select
-                        className={`w-full border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-300 ${
-                          labForm[key] === 'Reactive'
-                            ? 'border-rose-300 bg-rose-50 text-rose-700'
-                            : 'border-slate-200 text-emerald-700 bg-emerald-50'
-                        }`}
-                        value={labForm[key]}
-                        onChange={e => setLabForm(prev => ({ ...prev, [key]: e.target.value }))}
-                      >
-                        <option value="Non-Reactive">Non-Reactive</option>
-                        <option value="Reactive">Reactive</option>
-                        <option value="Indeterminate">Indeterminate</option>
-                      </select>
-                    </div>
-                  ))}
-
-                  {/* Others */}
-                  <div className="col-span-2">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Others / Remarks <span className="text-slate-300">(optional)</span></label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Hepatitis B Core Total â€“ Non-Reactive"
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                      value={labForm.othersResult}
-                      onChange={e => setLabForm(prev => ({ ...prev, othersResult: e.target.value }))}
-                    />
-                  </div>
-                </div>
+              {/* Info: Screening outcome is determined by Serology after reviewing lab results */}
+              <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-[10px] text-blue-700 leading-relaxed">
+                <strong>Next Step:</strong> After this donation is recorded, Serology staff will retrieve the DHQ using the serial number above and encode the lab results and screening outcome.
               </div>
             </div>
 
@@ -1667,10 +1576,10 @@ export default function RegistryDashboard() {
               {labSaved ? (
                 <div className="flex items-center gap-2 text-emerald-600">
                   <CheckCircle className="w-4 h-4" />
-                  <span className="text-xs font-bold">Lab result saved successfully!</span>
+                  <span className="text-xs font-bold">Donation recorded successfully!</span>
                 </div>
               ) : (
-                <p className="text-[10px] text-slate-400">All TTI tests default to Non-Reactive. Change to Reactive if applicable.</p>
+                <p className="text-[10px] text-slate-400">Serology will record lab results separately using the serial number.</p>
               )}
               <div className="flex items-center gap-2 ml-auto">
                 <button
@@ -1682,18 +1591,21 @@ export default function RegistryDashboard() {
                 </button>
                 <button
                   type="button"
-                  disabled={!labForm.donorId || !labForm.eventId}
+                  disabled={!labForm.donorId || !labForm.eventId || !labForm.serialNumber}
                   onClick={async () => {
-                    if (!labForm.donorId || !labForm.eventId) return;
-                    await addLabTestResult(labForm);
-                    await fetchLabResultsFromAPI();
-                    await fetchDonationsFromAPI(); // refresh so new donation appears in donor history
-                    setLabSaved(true);
-                    setTimeout(() => { setShowLabResultModal(false); setLabSaved(false); }, 1500);
+                    if (!labForm.donorId || !labForm.eventId || !labForm.serialNumber) return;
+                    try {
+                      await recordDonation(labForm);
+                      await fetchDonationsFromAPI();
+                      setLabSaved(true);
+                      setTimeout(() => { setShowLabResultModal(false); setLabSaved(false); }, 1500);
+                    } catch (err) {
+                      alert(err.message || 'Failed to record donation. The serial number may already exist.');
+                    }
                   }}
                   className="px-4 py-2 text-xs font-bold bg-slate-900 hover:bg-slate-700 text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  Save Lab Result
+                  Record Donation
                 </button>
               </div>
             </div>
@@ -1904,173 +1816,7 @@ export default function RegistryDashboard() {
         ]}
       />
 
-      {/* â”€â”€ ONSITE SCREENING OUTCOMES MODAL â”€â”€ */}
-      {editingMedicalDonor && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
-              <div>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <Stethoscope className="w-4 h-4 text-indigo-600" />
-                  <h3 className="font-bold text-slate-900 text-sm">Record Onsite Screening Outcome</h3>
-                </div>
-                <p className="text-[10px] text-slate-400 font-semibold">
-                  Donor: <span className="text-slate-700 font-bold">{editingMedicalDonor.name}</span>
-                  <span className="mx-2 text-slate-200">|</span>
-                  ID: <span className="font-mono text-slate-500">{editingMedicalDonor.id}</span>
-                </p>
-              </div>
-              <button onClick={() => { setEditingMedicalDonor(null); setEventSearchQuery(''); }} className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            {/* Scrollable form body */}
-            <div className="overflow-y-auto flex-1 p-6 space-y-5">
-
-              {/* Read-only donation event info — set when lab results were encoded */}
-              {(() => {
-                const donorNumId = parseInt(String(editingMedicalDonor.id ?? '').replace(/^D0*/i, ''), 10);
-                const existingDonation = (donations || []).find(d =>
-                  parseInt(String(d.donorId ?? d.donor_id ?? ''), 10) === donorNumId
-                );
-                const evId = existingDonation?.eventId ?? existingDonation?.event_id ?? '—';
-                const evDate = existingDonation?.donationDate ?? existingDonation?.donation_date ?? '—';
-                const evObj = (donationEvents || []).find(ev =>
-                  String(ev.eventId ?? ev.event_id).toUpperCase() === String(evId).toUpperCase()
-                );
-                return (
-                  <div className="grid grid-cols-4 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-[10px] font-semibold text-slate-600">
-                    <div>
-                      <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">Event</span>
-                      <span className="font-mono text-red-700 font-bold">{evId}</span>
-                    </div>
-                    <div>
-                      <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">Date</span>
-                      <span className="font-mono">{evDate}</span>
-                    </div>
-                    <div>
-                      <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">City / Mun.</span>
-                      <span>{evObj?.cityMunicipality ?? evObj?.city_municipality ?? '—'}</span>
-                    </div>
-                    <div>
-                      <span className="block text-slate-400 text-[9px] uppercase tracking-wider mb-0.5">Venue</span>
-                      <span>{evObj?.barangayOrganization ?? evObj?.barangay_organization ?? '—'}</span>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Section I-D: Screening Outcome */}
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-[9px] font-extrabold uppercase tracking-widest text-white bg-blue-600 px-2 py-0.5 rounded">Section I-D</span>
-                  <span className="text-xs font-bold text-slate-700">Screening & Deferral Outcome</span>
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Screening Outcome</label>
-                    <select value={medicalForm.screeningOutcome} onChange={e => setMedicalForm({ ...medicalForm, screeningOutcome: e.target.value })}
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none bg-white">
-                      {['Accepted', 'Temporarily Deferred', 'Permanently Deferred', 'Indefinite Deferral'].map(v => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                  </div>
-                  {medicalForm.screeningOutcome !== 'Accepted' && (
-                    <>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Deferral Reason</label>
-                        <input type="text" value={medicalForm.deferralReason}
-                          onChange={e => setMedicalForm({ ...medicalForm, deferralReason: e.target.value })}
-                          placeholder="e.g. Low hemoglobin"
-                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none" />
-                      </div>
-                      {medicalForm.screeningOutcome === 'Temporarily Deferred' && (
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Deferral End Date</label>
-                          <input type="date" value={medicalForm.deferralEndDate}
-                            onChange={e => setMedicalForm({ ...medicalForm, deferralEndDate: e.target.value })}
-                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none text-slate-600" />
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="px-6 py-4 border-t border-slate-100 flex-shrink-0">
-              <div className="flex items-center justify-between">
-                <p className="text-[10px] text-slate-400">Onsite screening decisions will update the donor's eligibility status.</p>
-                <div className="flex items-center gap-3">
-                  <button type="button" onClick={() => { setEditingMedicalDonor(null); setEventSearchQuery(''); }}
-                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer">
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={false}
-                    onClick={async () => {
-                      // Look up the existing donation so we can pass donation_id to the API
-                      const donorNumId = parseInt(String(editingMedicalDonor.id ?? '').replace(/^D0*/i, ''), 10);
-                      const existingDonation = (donations || []).find(d =>
-                        parseInt(String(d.donorId ?? d.donor_id ?? ''), 10) === donorNumId
-                      );
-                      const donationNumId = parseInt(
-                        String(existingDonation?.donationId ?? existingDonation?.donation_id ?? '').replace(/^DON-0*/i, ''),
-                        10
-                      );
-                      const evId = existingDonation?.eventId ?? existingDonation?.event_id ?? '';
-                      const evDate = existingDonation?.donationDate ?? existingDonation?.donation_date ?? '';
-                      await updateDonorMedical(editingMedicalDonor.id, {
-                        donation_id: isNaN(donationNumId) ? null : donationNumId,
-                        eventId: evId,
-                        donationDate: evDate,
-                        screeningOutcome: medicalForm.screeningOutcome,
-                        deferralReason: medicalForm.deferralReason,
-                        deferralEndDate: medicalForm.deferralEndDate,
-                      });
-                      setScreeningSuccessModal({
-                        isOpen: true,
-                        donorId: editingMedicalDonor.id,
-                        donorName: editingMedicalDonor.name,
-                        outcome: medicalForm.screeningOutcome,
-                        remarks: medicalForm.deferralReason,
-                        eventId: evId,
-                        venue: '',
-                        donationDate: evDate,
-                      });
-                      setEditingMedicalDonor(null);
-                      setEventSearchQuery('');
-                      await fetchDonationsFromAPI();
-                    }}
-                    className="px-4 py-2 text-xs font-bold text-white bg-[#C21C24] hover:bg-red-800 rounded-full transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    <CheckCircle className="w-3.5 h-3.5" /> Save Onsite Screening
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* â”€â”€ ONSITE SCREENING SUCCESS CONFIRMATION MODAL â”€â”€ */}
-      <SuccessModal
-        isOpen={screeningSuccessModal.isOpen}
-        title="Screening Outcome Saved"
-        message={`Onsite screening decisions updated for ${screeningSuccessModal.donorName}`}
-        confirmText="Done"
-        onClose={() => setScreeningSuccessModal({ isOpen: false, donorId: '', donorName: '', outcome: '', remarks: '', eventId: '', venue: '', donationDate: '' })}
-        details={[
-          { label: 'Donor', value: screeningSuccessModal.donorName },
-          { label: 'Outcome', value: screeningSuccessModal.outcome },
-          { label: 'Event', value: screeningSuccessModal.eventId },
-          { label: 'Date', value: screeningSuccessModal.donationDate },
-          ...(screeningSuccessModal.remarks ? [{ label: 'Reason', value: screeningSuccessModal.remarks }] : []),
-        ]}
-      />
 
     </div>
   );

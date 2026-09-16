@@ -12,7 +12,8 @@ class BloodInventory extends Model
     protected $fillable = [
         'donation_id', 'unit_code', 'blood_type', 'component',
         'volume_cc', 'collection_date', 'expiration_date',
-        'safety_status', 'intended_use', 'inventory_status', 'recorded_by',
+        'safety_status', 'intended_use', 'inventory_status',
+        'remarks', 'status_date', 'recorded_by',
     ];
 
     public function donation() { return $this->belongsTo(Donation::class, 'donation_id', 'donation_id'); }

@@ -21,9 +21,9 @@ const INTENDED_USES = ['Transfusable', 'Storage-Research Only', 'Restricted'];
 
 // Component specs — volume range (cc) + shelf life (days) based on DOH reference
 const COMPONENT_SPECS = {
-  'PRBC':                 { minCC: 230, maxCC: 330, shelfDays: 35 },
-  'Platelet Concentrate': { minCC: 50,  maxCC: 70,  shelfDays: 5  },
-  'FFP':                  { minCC: 150, maxCC: 250, shelfDays: 90 },
+  'PRBC':                 { minCC: 230, maxCC: 330, shelfDays: 35  },
+  'Platelet Concentrate': { minCC: 50,  maxCC: 70,  shelfDays: 5   },
+  'FFP':                  { minCC: 150, maxCC: 250, shelfDays: 90  },
   'Cryoprecipitate':      { minCC: 15,  maxCC: 30,  shelfDays: 180 },
   'Cryosupernate':        { minCC: 190, maxCC: 210, shelfDays: 365 },
 };
@@ -102,10 +102,11 @@ export default function IssuanceDashboard() {
   } = useBloodStore();
 
   // ── Forecast filter states ──
-  const [fcHospital,       setFcHospital]       = useState('ALL');
-  const [fcBloodType,      setFcBloodType]      = useState('ALL');
-  const [fcComponent,      setFcComponent]      = useState('ALL');
-  const [fcWeeks,          setFcWeeks]          = useState(4);
+  const [fcHospital,        setFcHospital]        = useState('ALL');
+  const [fcBloodType,       setFcBloodType]       = useState('ALL');
+  const [fcComponent,       setFcComponent]       = useState('ALL');
+  const [fcWeeks,           setFcWeeks]           = useState(4);
+  const [fcLoading,         setFcLoading]         = useState(false);
   const [chartClickedPoint, setChartClickedPoint] = useState(null);
 
   const BLOOD_TYPE_LIST = ['O+','O-','A+','A-','B+','B-','AB+','AB-'];
@@ -846,16 +847,14 @@ export default function IssuanceDashboard() {
                   <h3 className="text-base font-bold text-slate-900">Current Blood Stock</h3>
                   <p className="text-xs text-slate-500 mt-0.5">Real-time status of PRBC, Platelets, FFP, Cryoprecipitate and Cryosupernate.</p>
                 </div>
-                <button onClick={() => setShowUnitForm(true)}
-                  className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition-colors cursor-pointer">
-                  <Plus className="w-3.5 h-3.5" /> Record Blood Unit
-                </button>
               </div>
 
               {/* Stock summary table — each cell clickable to filter registry */}
               {(() => {
                 const BLOOD_TYPE_ORDER = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
-                const THRESHOLDS = { 'O+': 15, 'O-': 5, 'A+': 10, 'A-': 3, 'B+': 10, 'B-': 3, 'AB+': 5, 'AB-': 2 };
+                // Safe: ≥50 (O-: ≥100) | Low: ≥emergency reserve but <safe | Critical: <emergency reserve
+                const SAFE_THRESHOLD     = { 'O+': 50, 'O-': 100, 'A+': 50, 'A-': 50, 'B+': 50, 'B-': 50, 'AB+': 50, 'AB-': 50 };
+                const EMERGENCY_RESERVED = { 'O+': 10, 'O-': 10,  'A+': 10, 'A-': 10, 'B+': 10, 'B-': 10, 'AB+': 5,  'AB-': 5  };
                 const COMPONENT_KEY = { 'PRBC': 'units', 'Platelet Concentrate': 'platelets', 'FFP': 'ffp', 'Cryoprecipitate': 'cryo', 'Cryosupernate': 'cryosup' };
                 const COMP_COLS = [
                   { label: 'PRBC (Units)',    key: 'units',     comp: 'PRBC' },
@@ -876,9 +875,15 @@ export default function IssuanceDashboard() {
 
                 const computedRows = BLOOD_TYPE_ORDER.map(bt => {
                   const s = stockMap[bt];
-                  const threshold = THRESHOLDS[bt] ?? 5;
-                  const status = s.units === 0 ? 'critical' : s.units < threshold ? 'low' : 'safe';
-                  return { type: bt, ...s, threshold, status };
+                  const safe      = SAFE_THRESHOLD[bt]     ?? 50;
+                  const emergency = EMERGENCY_RESERVED[bt] ?? 10;
+                  // Default: total across ALL components for this blood type (overall view)
+                  // When a component cell is clicked: narrow to just that component
+                  const count = componentFilter !== 'All'
+                    ? (s[COMPONENT_KEY[componentFilter]] ?? 0)
+                    : (s.units + s.platelets + s.ffp + s.cryo + s.cryosup);
+                  const status = count >= safe ? 'safe' : count >= emergency ? 'low' : 'critical';
+                  return { type: bt, ...s, safe, emergency, status };
                 });
 
                 const handleCellClick = (bt, comp) => {
@@ -900,7 +905,9 @@ export default function IssuanceDashboard() {
                             {COMP_COLS.map(c => (
                               <th key={c.comp} className="px-6 py-3 font-bold text-center border-l border-slate-100">{c.label}</th>
                             ))}
-                            <th className="px-6 py-3 font-bold text-center border-l border-slate-100">PRBC Status</th>
+                            <th className="px-6 py-3 font-bold text-center border-l border-slate-100">
+                              {componentFilter !== 'All' ? `${componentFilter} Status` : 'Overall Status'}
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -931,9 +938,21 @@ export default function IssuanceDashboard() {
                               })}
                               {/* Status badge — non-clickable */}
                               <td className="px-6 py-3.5 text-center border-l border-slate-100">
-                                {item.status === 'safe'     && <span className="bg-emerald-50 border border-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Safe</span>}
-                                {item.status === 'low'      && <span className="bg-amber-50 border border-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><Activity className="w-3 h-3" /> Low</span>}
-                                {item.status === 'critical' && <span className="bg-rose-50 border border-rose-100 text-[#C21C24] px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Critical</span>}
+                                {item.status === 'safe' && (
+                                  <span className="bg-emerald-50 border border-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1">
+                                    <CheckCircle className="w-3 h-3" /> Safe
+                                  </span>
+                                )}
+                                {item.status === 'low' && (
+                                  <span className="bg-amber-50 border border-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1">
+                                    <Activity className="w-3 h-3" /> Low
+                                  </span>
+                                )}
+                                {item.status === 'critical' && (
+                                  <span className="bg-rose-50 border border-rose-100 text-[#C21C24] px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1">
+                                    <AlertTriangle className="w-3 h-3" /> Critical
+                                  </span>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -999,7 +1018,6 @@ export default function IssuanceDashboard() {
                           <tr className="bg-slate-50 border-b border-slate-200 uppercase tracking-wider text-slate-400">
                             <th className="px-5 py-3 font-bold">Unit ID</th>
                             <th className="px-5 py-3 font-bold">Serial No.</th>
-                            <th className="px-5 py-3 font-bold">Donor</th>
                             <th className="px-5 py-3 font-bold text-center">Type</th>
                             <th className="px-5 py-3 font-bold">Component</th>
                             <th className="px-5 py-3 font-bold text-center">Collected</th>
@@ -1018,15 +1036,25 @@ export default function IssuanceDashboard() {
                               <td className="px-5 py-3 font-mono text-indigo-700 text-[11px] font-bold">
                                 {unit.serialNumber || <span className="text-slate-300">—</span>}
                               </td>
-                              <td className="px-5 py-3 text-xs text-slate-700 font-semibold max-w-[120px] truncate">
-                                {unit.donorName || <span className="text-slate-300">—</span>}
-                              </td>
                               <td className="px-5 py-3 text-center">
                                 <span className="px-1.5 py-0.5 bg-rose-50 border border-rose-100 text-[#C21C24] font-black rounded text-[10px] font-mono">{unit.bloodType ?? unit.bloodTypeId}</span>
                               </td>
                               <td className="px-5 py-3 font-bold text-slate-700">{unit.component ?? unit.componentId}</td>
                               <td className="px-5 py-3 text-center font-mono text-[10px]">{unit.collectionDate || '—'}</td>
-                              <td className="px-5 py-3 text-center font-mono text-[10px]">{unit.expirationDate}</td>
+                              <td className="px-5 py-3 text-center font-mono text-[10px]">
+                                {(() => {
+                                  const days = unit.expirationDate ? Math.ceil((new Date(unit.expirationDate) - new Date()) / 86400000) : null;
+                                  const urgent = days !== null && days >= 0 && days <= 7;
+                                  const expired = days !== null && days < 0;
+                                  return (
+                                    <span className={urgent ? 'text-amber-600 font-bold' : expired ? 'text-rose-600 font-bold' : ''}>
+                                      {unit.expirationDate}
+                                      {urgent && <span className="block text-[9px] text-amber-500">⚠ {days}d left</span>}
+                                      {expired && <span className="block text-[9px] text-rose-500">Expired</span>}
+                                    </span>
+                                  );
+                                })()}
+                              </td>
                               <td className="px-5 py-3 text-center font-bold text-slate-800">{unit.quantity} cc</td>
                               <td className="px-5 py-3 text-center">
                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -1733,6 +1761,19 @@ export default function IssuanceDashboard() {
             return (
               <div className="space-y-5 fade-in">
 
+                {/* Loading toast at top */}
+                {fcLoading && (
+                  <div className="sticky top-4 z-40 flex items-center gap-3 bg-slate-900 text-white px-5 py-3 rounded-xl shadow-xl w-fit mx-auto">
+                    <div className="loading">
+                      <svg width="40px" height="30px" viewBox="0 0 48 48">
+                        <polyline points="0.15, 24 16.15, 24 20.15, 12 24.15, 36 28.15, 18 32.15, 30 36.15, 24 47.85, 24" id="back"></polyline>
+                        <polyline points="0.15, 24 16.15, 24 20.15, 12 24.15, 36 28.15, 18 32.15, 30 36.15, 24 47.85, 24" id="front"></polyline>
+                      </svg>
+                    </div>
+                    <span className="text-sm font-bold">Running MLR Forecast…</span>
+                  </div>
+                )}
+
                 {/* Algorithm banner */}
                 <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-xl p-5 flex items-start gap-4">
                   <div className="w-10 h-10 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
@@ -1768,9 +1809,19 @@ export default function IssuanceDashboard() {
                           ↩ Reset to Overview
                         </button>
                       )}
-                      <button onClick={() => generateGranularForecast(fcWeeks)}
-                        className="bg-slate-900 text-white px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-800 transition flex items-center gap-2 shadow-sm cursor-pointer">
-                        <Activity className="w-3.5 h-3.5" /> Re-run Forecast
+                      <button
+                        disabled={fcLoading}
+                        onClick={async () => {
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                          setFcLoading(true);
+                          try { await generateGranularForecast(fcWeeks); }
+                          finally { setFcLoading(false); }
+                        }}
+                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 shadow-sm
+                          ${fcLoading ? 'bg-slate-500 text-slate-300 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-800 cursor-pointer'}`}>
+                        {fcLoading
+                          ? <><span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-white rounded-full animate-spin inline-block"></span> Running…</>
+                          : <><Activity className="w-3.5 h-3.5" /> Re-run Forecast</>}
                       </button>
                     </div>
                   </div>

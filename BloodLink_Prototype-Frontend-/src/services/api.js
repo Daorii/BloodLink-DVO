@@ -254,6 +254,10 @@ export async function apiGetLabResultByDonation(donationId) {
   return request(`/donations/${donationId}/lab-result`);
 }
 
+export async function apiGetDonationBySerial(serialNumber) {
+  return request(`/donations/by-serial/${encodeURIComponent(serialNumber)}`);
+}
+
 // ─── Blood Requests endpoints ─────────────────────────────────────────────
 
 export async function apiGetBloodRequests() {

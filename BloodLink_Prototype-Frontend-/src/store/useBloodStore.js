@@ -5,7 +5,7 @@ import { apiGetHospitals, apiCreateHospital, apiUpdateHospital, apiDeleteHospita
 import { apiGetDonors, apiCreateDonor, apiUpdateDonor, apiDeleteDonor } from '../services/api';
 import { apiGetDonationEvents, apiCreateDonationEvent, apiUpdateDonationEvent, apiDeleteDonationEvent } from '../services/api';
 import { apiCreateDonation, apiGetDonations, apiUpdateDonationOutcome } from '../services/api';
-import { apiCreateLabResult, apiGetLabResults } from '../services/api';
+import { apiCreateLabResult, apiGetLabResults, apiGetDonationBySerial } from '../services/api';
 import { apiGetBloodRequests, apiCreateBloodRequest, apiUpdateBloodRequestStatus } from '../services/api';
 import { apiGetBloodIssuances, apiCreateBloodIssuance, apiApproveBloodRelease } from '../services/api';
 import { apiGetBloodInventory, apiCreateBloodInventory } from '../services/api';
@@ -1138,7 +1138,7 @@ export const useBloodStore = create(
           ? parseInt(String(labForm.eventId).replace(/^EVT-0*/i, ''), 10) : null;
 
         let apiSucceeded = false;
-        if (!isNaN(numericDonorId)) {
+        if (!isNaN(numericDonorId) || labForm.serialNumber) {
           try {
             await apiCreateLabResult({
               donorId:            numericDonorId,
@@ -1154,6 +1154,8 @@ export const useBloodStore = create(
               malariaResult:      labForm.malariaResult      || null,
               natResult:          labForm.natResult          || null,
               othersResult:       labForm.othersResult       || null,
+              screeningOutcome:   labForm.screeningOutcome   || null,
+              deferralReason:     labForm.deferralReason     || null,
             });
             apiSucceeded = true;
           } catch (err) {
@@ -1210,6 +1212,39 @@ export const useBloodStore = create(
             }, ...state.auditLogs]
           };
         });
+      },
+
+      recordDonation: async (form) => {
+        // Called by Registry to record a donation with serial number from the DHQ.
+        // Does NOT include lab results — those are handled by Serology.
+        const numericDonorId = parseInt(String(form.donorId ?? '').replace(/^D0*/i, ''), 10);
+        const numericEventId = form.eventId
+          ? parseInt(String(form.eventId).replace(/^EVT-0*/i, ''), 10) : null;
+
+        if (isNaN(numericDonorId)) throw new Error('Invalid donor ID');
+
+        const data = await apiCreateDonation({
+          donorId:          numericDonorId,
+          eventId:          (!isNaN(numericEventId) ? numericEventId : null),
+          donationDate:     form.donationDate || new Date().toISOString().slice(0, 10),
+          serialNumber:     form.serialNumber || null,
+          screeningOutcome: form.screeningOutcome || null,
+          deferralReason:   form.deferralReason   || null,
+          deferralEndDate:  form.deferralEndDate   || null,
+        });
+
+        // Re-fetch donations to keep the list current
+        try {
+          const donData = await apiGetDonations();
+          set({ donations: donData.donations ?? [] });
+        } catch (_) {}
+
+        return data;
+      },
+
+      fetchDonationBySerial: async (serial) => {
+        // Serology uses this to auto-populate donor info from a DHQ serial number.
+        return apiGetDonationBySerial(serial);
       },
 
       addUser: async (userForm) => {
@@ -1541,65 +1576,27 @@ export const useBloodStore = create(
       },
 
       recordBloodUnit: async (unitForm) => {
-        // ── Try API first ──
-        let apiSucceeded = false;
-        try {
-          await apiCreateBloodInventory({
-            donationId:     unitForm.donationId     || null,
-            unitCode:       unitForm.unitId         || null,
-            bloodType:      unitForm.bloodType      || 'O+',
-            component:      unitForm.component      || 'PRBC',
-            volumeCC:       parseFloat(unitForm.quantity) || 0,
-            collectionDate: unitForm.collectionDate || new Date().toISOString().slice(0, 10),
-            expirationDate: unitForm.expirationDate || '',
-            safetyStatus:   unitForm.safetyStatus   || 'Cleared',
-            intendedUse:    unitForm.intendedUse    || 'Transfusable',
-            inventoryStatus: 'Available',
-          });
-          apiSucceeded = true;
-        } catch (err) {
-          console.error('[BloodLink] apiCreateBloodInventory failed:', err.message);
-        }
-
-        // ── If API succeeded, re-fetch canonical state ──
-        if (apiSucceeded) {
-          try {
-            const data = await apiGetBloodInventory();
-            if (data.bloodInventory) { set({ bloodInventory: data.bloodInventory }); return; }
-          } catch (_) { /* fall through */ }
-        }
-
-        // ── Offline fallback: local state only ──
-        set((state) => {
-          let assignedUnitId = (unitForm.unitId || '').trim();
-          if (!assignedUnitId) {
-            const existingIds = state.bloodInventory.map(u => {
-              const numeric = parseInt(String(u.unitId).replace(/\D/g, ''), 10);
-              return isNaN(numeric) ? 0 : numeric;
-            });
-            const nextNum = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
-            assignedUnitId = `BU-${new Date().getFullYear()}-${String(nextNum).padStart(3, '0')}`;
-          }
-          const newUnit = {
-            unitId: assignedUnitId,
-            donationId: unitForm.donationId || '',
-            serialNumber: unitForm.serialNumber || '',
-            donorName: unitForm.donorName || '',
-            bloodType:  unitForm.bloodType  || 'O+',
-            bloodTypeId: unitForm.bloodType || 'O+',
-            component:   unitForm.component  || 'PRBC',
-            componentId: unitForm.component  || 'PRBC',
-            collectionDate: unitForm.collectionDate || new Date().toISOString().slice(0, 10),
-            expirationDate: unitForm.expirationDate || '',
-            quantity:       parseFloat(unitForm.quantity) || 0,
-            volumeCC:       parseFloat(unitForm.quantity) || 0,
-            safetyStatus:   unitForm.safetyStatus   || 'Cleared',
-            intendedUse:    unitForm.intendedUse    || 'Transfusable',
-            inventoryStatus: 'Available',
-            recordedBy: state.authSystemUser?.id || 'USR-004',
-          };
-          return { bloodInventory: [newUnit, ...state.bloodInventory] };
+        // Always try the API. If it fails, throw so the caller can show a real error.
+        // We no longer fall back to local-state-only — that caused records to disappear
+        // when the page re-mounted and fetchBloodInventoryFromAPI() overwrote local state.
+        await apiCreateBloodInventory({
+          donationId:     unitForm.donationId ? parseInt(unitForm.donationId, 10) : null,
+          unitCode:       unitForm.unitId         || null,
+          bloodType:      unitForm.bloodType      || 'O+',
+          component:      unitForm.component      || 'PRBC',
+          volumeCC:       unitForm.volumeCC != null && unitForm.volumeCC !== '' ? parseFloat(unitForm.volumeCC) : (parseFloat(unitForm.quantity) || 0),
+          collectionDate: unitForm.collectionDate || new Date().toISOString().slice(0, 10),
+          expirationDate: unitForm.expirationDate || '',
+          safetyStatus:   unitForm.safetyStatus   || 'Cleared',
+          intendedUse:    unitForm.intendedUse    || 'Transfusable',
+          remarks:        unitForm.remarks        || null,
+          statusDate:     unitForm.statusDate     || null,
         });
+        // API succeeded — re-fetch canonical inventory from DB
+        try {
+          const data = await apiGetBloodInventory();
+          if (data.bloodInventory) set({ bloodInventory: data.bloodInventory });
+        } catch (_) { /* non-critical: UI will refresh on next mount */ }
       },
 
       approveRecommendation: (recId) => {

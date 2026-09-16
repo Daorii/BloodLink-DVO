@@ -14,7 +14,8 @@ class BloodInventoryController extends Controller
     private const VALID_INTENDED_USE  = ['Transfusable', 'Storage-Research Only', 'Restricted'];
     private const VALID_STATUS        = ['Available', 'Reserved', 'Issued', 'Expired', 'Discarded'];
 
-    // Volume ranges per component (cc) — based on DOH reference chart
+    // Acceptable volume ranges per component (cc) — SNBC / DOH NVBSP reference chart
+    // Expiry countdown starts the day AFTER collection (tomorrow = Day 1)
     private const VOLUME_RANGES = [
         'PRBC'                 => ['min' => 230, 'max' => 330],
         'Platelet Concentrate' => ['min' => 50,  'max' => 70 ],
@@ -53,15 +54,31 @@ class BloodInventoryController extends Controller
             'safetyStatus'    => 'nullable|string|in:' . implode(',', self::VALID_SAFETY),
             'intendedUse'     => 'nullable|string|in:' . implode(',', self::VALID_INTENDED_USE),
             'inventoryStatus' => 'nullable|string|in:' . implode(',', self::VALID_STATUS),
+            // Non-cleared status documentation
+            'remarks'         => 'nullable|string|max:500',
+            'statusDate'      => 'nullable|date',
         ]);
 
-        // Server-side volume range validation
+        // Server-side volume range soft-validation:
+        // If outside the acceptable range, force safety_status to NCU (Non-Conforming Unit).
+        // We do NOT reject the request — staff are allowed to record non-conforming units.
         $range = self::VOLUME_RANGES[$v['component']] ?? null;
+        $safetyStatus = $v['safetyStatus'] ?? 'Cleared';
         if ($range && ($v['volumeCC'] < $range['min'] || $v['volumeCC'] > $range['max'])) {
-            return response()->json([
-                'message' => "Volume for {$v['component']} must be between {$range['min']} and {$range['max']} cc.",
-                'errors'  => ['volumeCC' => ["Volume must be {$range['min']}–{$range['max']} cc for {$v['component']}."]],
-            ], 422);
+            // Override to NCU — cannot be Cleared if volume is non-conforming
+            $safetyStatus = 'NCU';
+        }
+
+        // For Hold-Quarantined / NCU: allow remarks + statusDate
+        // For Discarded: record as-is (no documentation required)
+        // For Cleared: no remarks needed
+        $remarks    = in_array($safetyStatus, ['Hold-Quarantined', 'NCU']) ? ($v['remarks'] ?? null) : null;
+        $statusDate = in_array($safetyStatus, ['Hold-Quarantined', 'NCU']) ? ($v['statusDate'] ?? null) : null;
+
+        // Inventory status: Hold/NCU units are NOT available for issuance
+        $inventoryStatus = $v['inventoryStatus'] ?? 'Available';
+        if (in_array($safetyStatus, ['Hold-Quarantined', 'NCU', 'Discarded'])) {
+            $inventoryStatus = 'Discarded' === $safetyStatus ? 'Discarded' : 'Reserved';
         }
 
         $unit = BloodInventory::create([
@@ -72,9 +89,11 @@ class BloodInventoryController extends Controller
             'volume_cc'        => $v['volumeCC'],
             'collection_date'  => $v['collectionDate'],
             'expiration_date'  => $v['expirationDate'],
-            'safety_status'    => $v['safetyStatus']    ?? 'Cleared',
+            'safety_status'    => $safetyStatus,
             'intended_use'     => $v['intendedUse']     ?? 'Transfusable',
-            'inventory_status' => $v['inventoryStatus'] ?? 'Available',
+            'inventory_status' => $inventoryStatus,
+            'remarks'          => $remarks,
+            'status_date'      => $statusDate,
             'recorded_by'      => $request->user()?->user_id,
         ]);
 
@@ -126,6 +145,8 @@ class BloodInventoryController extends Controller
             'safetyStatus'    => $u->safety_status,
             'intendedUse'     => $u->intended_use,
             'inventoryStatus' => $u->inventory_status,
+            'remarks'         => $u->remarks,
+            'statusDate'      => $u->status_date,
             'recordedBy'      => $u->recorded_by,
             'createdAt'       => $u->created_at?->toDateTimeString(),
         ];

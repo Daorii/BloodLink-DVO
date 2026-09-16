@@ -26,17 +26,17 @@ class LabTestResultController extends Controller
     /**
      * POST /api/lab-results
      *
-     * Accepts: donorId, eventId (optional), donationDate, serialNumber (optional), + all test fields.
-     * Automatically creates a PENDING donation record first (with auto-generated serial number),
-     * then attaches lab results.
+     * Serology calls this with the serial number from the DHQ.
+     * If a donation with that serial number already exists (recorded by Registry),
+     * lab results are attached to it. Otherwise a new donation is created.
      */
     public function store(Request $request): JsonResponse
     {
         $v = $request->validate([
-            'donorId'            => 'required|integer',
+            'donorId'            => 'nullable|integer',
             'eventId'            => 'nullable|integer',
-            'donationDate'       => 'required|date',
-            'serialNumber'       => 'nullable|string|max:20|unique:donations,serial_number',
+            'donationDate'       => 'nullable|date',
+            'serialNumber'       => 'required|string|max:30',
             'hemoglobinResult'   => 'nullable|string|max:20',
             'bloodTypeConfirmed' => 'nullable|string|in:' . implode(',', self::VALID_BLOOD_TYPES),
             'hbsagResult'        => 'nullable|string|max:20',
@@ -46,41 +46,54 @@ class LabTestResultController extends Controller
             'malariaResult'      => 'nullable|string|max:20',
             'natResult'          => 'nullable|string|max:20',
             'othersResult'       => 'nullable|string|max:50',
+            'screeningOutcome'   => 'nullable|string|in:Accepted,Temporarily Deferred,Permanently Deferred,Indefinite Deferral',
         ]);
 
-        // Resolve eventId — null if the event doesn't exist
-        $eventId = null;
-        if (!empty($v['eventId'])) {
-            $eventId = DonationEvent::where('event_id', $v['eventId'])->exists()
-                ? $v['eventId'] : null;
+        // Check if a donation already exists with this serial number (Registry recorded it)
+        $donation = Donation::where('serial_number', $v['serialNumber'])->first();
+
+        if ($donation) {
+            // Donation already recorded by Registry — check it has no lab result yet
+            if (LabTestResult::where('donation_id', $donation->donation_id)->exists()) {
+                return response()->json([
+                    'message' => 'Lab results for serial number ' . $v['serialNumber'] . ' have already been recorded.',
+                ], 422);
+            }
+        } else {
+            // No existing donation — require donorId so we can create one
+            if (empty($v['donorId'])) {
+                return response()->json([
+                    'message' => 'No donation found for serial number ' . $v['serialNumber'] . '. Please ask Registry to record the donation first, or provide the donor ID.',
+                ], 404);
+            }
+
+            $eventId = null;
+            if (!empty($v['eventId'])) {
+                $eventId = DonationEvent::where('event_id', $v['eventId'])->exists()
+                    ? $v['eventId'] : null;
+            }
+
+            $donation = Donation::create([
+                'donor_id'          => $v['donorId'],
+                'event_id'          => $eventId,
+                'donation_date'     => $v['donationDate'] ?? now()->toDateString(),
+                'serial_number'     => $v['serialNumber'],
+                'screening_outcome' => null,
+                'recorded_by'       => $request->user()?->user_id,
+            ]);
         }
 
-        // Auto-generate serial number if not provided by staff
-        // Format: YYYY-NNNN (e.g. 2026-0001)
-        $serialNumber = $v['serialNumber'] ?? null;
-        if (!$serialNumber) {
-            $year  = date('Y');
-            $count = Donation::whereYear('created_at', $year)->count() + 1;
-            $serialNumber = $year . '-' . str_pad((string) $count, 4, '0', STR_PAD_LEFT);
-
-            // Ensure uniqueness (in case of race conditions)
-            while (Donation::where('serial_number', $serialNumber)->exists()) {
-                $count++;
-                $serialNumber = $year . '-' . str_pad((string) $count, 4, '0', STR_PAD_LEFT);
+        // If Serology provides a screening outcome, update the donation record now
+        if (!empty($v['screeningOutcome'])) {
+            $donation->update(['screening_outcome' => $v['screeningOutcome']]);
+            if ($donation->donor_id) {
+                \App\Models\Donor::where('donor_id', $donation->donor_id)->update([
+                    'donor_status' => $v['screeningOutcome'] === 'Accepted' ? 'Regular' : 'Lapsed',
+                ]);
             }
         }
 
-        // Step 1: Create a PENDING donation record (no screening outcome yet)
-        $donation = Donation::create([
-            'donor_id'          => $v['donorId'],
-            'event_id'          => $eventId,
-            'donation_date'     => $v['donationDate'],
-            'serial_number'     => $serialNumber,
-            'screening_outcome' => null, // pending
-            'recorded_by'       => $request->user()?->user_id,
-        ]);
-
-        // Step 2: Attach lab results to that donation
+        // Attach lab results to the donation
         $result = LabTestResult::create([
             'donation_id'          => $donation->donation_id,
             'hemoglobin_result'    => $v['hemoglobinResult']   ?? null,
@@ -98,7 +111,7 @@ class LabTestResultController extends Controller
         return response()->json([
             'donation'  => (new DonationController)->formatPublic($donation->load(['donor', 'event'])),
             'labResult' => $this->format($result->load('donation.donor')),
-            'message'   => 'Lab results recorded. Donation is pending screening outcome.',
+            'message'   => 'Lab results recorded successfully.',
         ], 201);
     }
 

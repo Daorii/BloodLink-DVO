@@ -19,15 +19,19 @@ class DonationController extends Controller
     }
 
     /**
-     * Create a PENDING donation (no outcome yet).
-     * Called by lab staff when starting a new donation record.
+     * Create a donation record (called by Registry staff).
+     * Accepts serial number from the physical DHQ form.
      */
     public function store(Request $request): JsonResponse
     {
         $v = $request->validate([
-            'donorId'      => 'required|integer',
-            'eventId'      => 'nullable|integer',
-            'donationDate' => 'required|date',
+            'donorId'          => 'required|integer',
+            'eventId'          => 'nullable|integer',
+            'donationDate'     => 'required|date',
+            'serialNumber'     => 'nullable|string|max:30|unique:donations,serial_number',
+            'screeningOutcome' => 'nullable|string|in:Accepted,Temporarily Deferred,Permanently Deferred,Indefinite Deferral',
+            'deferralReason'   => 'nullable|string',
+            'deferralEndDate'  => 'nullable|date',
         ]);
 
         $eventId = null;
@@ -40,19 +44,47 @@ class DonationController extends Controller
             'donor_id'          => $v['donorId'],
             'event_id'          => $eventId,
             'donation_date'     => $v['donationDate'],
-            'screening_outcome' => null, // pending — will be set after lab results
+            'serial_number'     => $v['serialNumber'] ?? null,
+            'screening_outcome' => $v['screeningOutcome'] ?? null,
+            'deferral_reason'   => $v['deferralReason'] ?? null,
+            'deferral_end_date' => $v['deferralEndDate'] ?? null,
             'recorded_by'       => $request->user()?->user_id,
         ]);
 
+        // Update donor status if outcome is provided
+        if (!empty($v['screeningOutcome'])) {
+            $status = $v['screeningOutcome'] === 'Accepted' ? 'Regular' : 'Lapsed';
+            Donor::where('donor_id', $v['donorId'])->update(['donor_status' => $status]);
+        }
+
         return response()->json([
             'donation' => $this->format($donation->load(['donor', 'event'])),
-            'message'  => 'Donation record created (pending outcome).',
+            'message'  => 'Donation record created successfully.',
         ], 201);
     }
 
     /**
+     * Look up a donation by serial number (used by Serology to auto-fill donor info).
+     * GET /api/donations/by-serial/{serial}
+     */
+    public function findBySerial(string $serial): JsonResponse
+    {
+        $donation = Donation::with(['donor', 'event', 'labResult'])
+            ->where('serial_number', $serial)
+            ->first();
+
+        if (!$donation) {
+            return response()->json(['message' => 'No donation found with this serial number.'], 404);
+        }
+
+        return response()->json([
+            'donation'     => $this->format($donation),
+            'hasLabResult' => $donation->labResult !== null,
+        ]);
+    }
+
+    /**
      * Update only the screening outcome of an existing donation.
-     * Called after lab results are recorded.
      */
     public function updateOutcome(Request $request, int $id): JsonResponse
     {
@@ -61,7 +93,6 @@ class DonationController extends Controller
             return response()->json(['message' => 'Donation not found.'], 404);
         }
 
-        // Must have lab results before recording outcome
         if (!LabTestResult::where('donation_id', $id)->exists()) {
             return response()->json([
                 'message' => 'Cannot record outcome — lab results must be recorded first.'
@@ -80,11 +111,7 @@ class DonationController extends Controller
             'deferral_end_date' => $v['deferralEndDate'] ?? null,
         ]);
 
-        // Update donor status
-        $status = match($v['screeningOutcome']) {
-            'Accepted'             => 'Regular',
-            default                => 'Lapsed',
-        };
+        $status = $v['screeningOutcome'] === 'Accepted' ? 'Regular' : 'Lapsed';
         Donor::where('donor_id', $donation->donor_id)->update(['donor_status' => $status]);
 
         return response()->json([
@@ -93,7 +120,6 @@ class DonationController extends Controller
         ]);
     }
 
-    /** Public wrapper so other controllers can format a donation */
     public function formatPublic(Donation $d): array { return $this->format($d); }
 
     private function format(Donation $d): array
@@ -110,7 +136,7 @@ class DonationController extends Controller
             'eventId'          => $eventId,
             'donationDate'     => $d->donation_date,
             'serialNumber'     => $d->serial_number,
-            'screeningOutcome' => $d->screening_outcome,  // null = pending
+            'screeningOutcome' => $d->screening_outcome,
             'deferralReason'   => $d->deferral_reason,
             'deferralEndDate'  => $d->deferral_end_date,
             'recordedBy'       => $d->recorded_by,
