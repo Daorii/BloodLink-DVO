@@ -248,11 +248,15 @@ export default function ProductionDashboard() {
       // Collection date required
       if (!row.collectionDate) {
         errors.push(`${label}: Collection / Processing Date is required.`);
+      } else if (new Date(`${row.collectionDate}T00:00:00`) > new Date(new Date().toDateString())) {
+        errors.push(`${label}: Collection / Processing Date cannot be in the future.`);
       }
 
       // Expiry date required
       if (!row.expirationDate) {
         errors.push(`${label}: Expiry Date is required.`);
+      } else if (row.collectionDate && new Date(`${row.expirationDate}T00:00:00`) <= new Date(`${row.collectionDate}T00:00:00`)) {
+        errors.push(`${label}: Expiry Date must be after the collection date.`);
       }
 
       // Hold-Quarantined / NCU require a remarks reason

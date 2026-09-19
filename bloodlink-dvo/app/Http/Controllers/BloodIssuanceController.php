@@ -9,6 +9,7 @@ use App\Models\BloodRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class BloodIssuanceController extends Controller
 {
@@ -57,6 +58,24 @@ class BloodIssuanceController extends Controller
         ]);
 
         $issuance = DB::transaction(function () use ($v, $request) {
+            $requestRecord = BloodRequest::lockForUpdate()->findOrFail($v['requestId']);
+            if (!in_array($requestRecord->request_status, ['Verified'], true)) {
+                throw ValidationException::withMessages(['requestId' => ['Only verified requests can be prepared for release.']]);
+            }
+
+            foreach ($v['items'] as $item) {
+                $available = BloodInventory::where('blood_type', $item['bloodType'])
+                    ->where('component', $item['component'])
+                    ->where('inventory_status', 'Available')
+                    ->lockForUpdate()
+                    ->count();
+                if ($item['quantityIssued'] > $available) {
+                    throw ValidationException::withMessages([
+                        'items' => ["Insufficient stock for {$item['bloodType']} {$item['component']}: {$available} unit(s) available."],
+                    ]);
+                }
+            }
+
             // Create issuance record
             $iss = BloodIssuance::create([
                 'request_id'   => $v['requestId'],

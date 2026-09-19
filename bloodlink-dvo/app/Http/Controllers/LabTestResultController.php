@@ -33,20 +33,21 @@ class LabTestResultController extends Controller
     public function store(Request $request): JsonResponse
     {
         $v = $request->validate([
-            'donorId'            => 'nullable|integer',
+            'donorId'            => 'nullable|integer|exists:donors,donor_id',
             'eventId'            => 'nullable|integer',
-            'donationDate'       => 'nullable|date',
-            'serialNumber'       => 'required|string|max:30',
-            'hemoglobinResult'   => 'nullable|string|max:20',
-            'bloodTypeConfirmed' => 'nullable|string|in:' . implode(',', self::VALID_BLOOD_TYPES),
+            'donationDate'       => 'nullable|date|before_or_equal:today',
+            'serialNumber'       => ['required', 'string', 'max:30', 'regex:/^[A-Za-z0-9-]+$/'],
+            'hemoglobinResult'   => 'required|numeric|between:5,25',
+            'bloodTypeConfirmed' => 'required|string|in:' . implode(',', self::VALID_BLOOD_TYPES),
             'hbsagResult'        => 'nullable|string|max:20',
             'syphilisResult'     => 'nullable|string|max:20',
             'hivResult'          => 'nullable|string|max:20',
             'hcvResult'          => 'nullable|string|max:20',
             'malariaResult'      => 'nullable|string|max:20',
             'natResult'          => 'nullable|string|max:20',
-            'othersResult'       => 'nullable|string|max:50',
+            'othersResult'       => 'nullable|string|max:255',
             'screeningOutcome'   => 'nullable|string|in:Accepted,Temporarily Deferred,Permanently Deferred,Indefinite Deferral',
+            'deferralReason'     => 'required_unless:screeningOutcome,Accepted|nullable|string|max:255',
         ]);
 
         // Check if a donation already exists with this serial number (Registry recorded it)
@@ -85,7 +86,10 @@ class LabTestResultController extends Controller
 
         // If Serology provides a screening outcome, update the donation record now
         if (!empty($v['screeningOutcome'])) {
-            $donation->update(['screening_outcome' => $v['screeningOutcome']]);
+            $donation->update([
+                'screening_outcome' => $v['screeningOutcome'],
+                'deferral_reason'   => $v['deferralReason'] ?? null,
+            ]);
             if ($donation->donor_id) {
                 \App\Models\Donor::where('donor_id', $donation->donor_id)->update([
                     'donor_status' => $v['screeningOutcome'] === 'Accepted' ? 'Regular' : 'Lapsed',

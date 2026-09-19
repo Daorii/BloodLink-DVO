@@ -12,46 +12,55 @@ use Illuminate\Support\Facades\Log;
 class DonorRecallController extends Controller
 {
     /**
-     * Send an SMS via Infobip.
-     * PH format: strip leading 0, prepend 63 → e.g. 09665624874 → 639665624874
+     * Send an SMS through PhilSMS.
+     * PhilSMS expects Philippine mobile numbers in international form, e.g.
+     * 09665624874 -> 639665624874.
      */
     private function sendSMS(string $phone, string $message): bool
     {
-        $apiKey  = env('INFOBIP_API_KEY');
-        $baseUrl = env('INFOBIP_BASE_URL');
+        $apiToken = env('PHILSMS_API_TOKEN');
+        $senderId = env('PHILSMS_SENDER_ID', 'PhilSMS');
+        $apiUrl   = env('PHILSMS_API_URL', 'https://app.philsms.com/api/v3/sms/send');
 
-        if (!$apiKey || !$baseUrl) {
-            Log::warning('Infobip credentials not set — SMS skipped.');
+        if (!$apiToken) {
+            Log::warning('PhilSMS API token not set — SMS skipped.');
             return false;
         }
 
-        // Normalise to international format (63XXXXXXXXX)
-        $phone = preg_replace('/[\s\-\+]/', '', $phone);
+        // Normalize to the format PhilSMS requires: 639XXXXXXXXX.
+        $phone = preg_replace('/\D/', '', $phone);
         if (str_starts_with($phone, '0')) {
             $phone = '63' . substr($phone, 1);
         }
 
-        try {
-            $response = Http::withHeaders([
-                'Authorization' => 'App ' . $apiKey,
-                'Content-Type'  => 'application/json',
-                'Accept'        => 'application/json',
-            ])->post("https://{$baseUrl}/sms/2/text/single", [
-                'from' => 'BloodLink',
-                'to'   => $phone,
-                'text' => $message,
-            ]);
+        if (!preg_match('/^639\d{9}$/', $phone)) {
+            Log::warning('PhilSMS skipped an invalid Philippine mobile number.');
+            return false;
+        }
 
-            if ($response->successful()) {
-                Log::info("Infobip SMS sent to {$phone}");
+        try {
+            $response = Http::withToken($apiToken)
+                ->acceptJson()
+                ->post($apiUrl, [
+                    'recipient' => $phone,
+                    'sender_id' => $senderId,
+                    'type'      => 'plain',
+                    'message'   => $message,
+                ]);
+
+            if ($response->successful() && data_get($response->json(), 'status') === 'success') {
+                Log::info('PhilSMS recall message accepted.', ['recipient' => $phone]);
                 return true;
             }
 
-            Log::error("Infobip error ({$response->status()}): " . $response->body());
+            Log::error('PhilSMS request failed.', [
+                'status' => $response->status(),
+                'body'   => $response->json() ?? $response->body(),
+            ]);
             return false;
 
         } catch (\Throwable $e) {
-            Log::error("Infobip exception: " . $e->getMessage());
+            Log::error('PhilSMS exception: ' . $e->getMessage());
             return false;
         }
     }

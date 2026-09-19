@@ -25,6 +25,7 @@ import {
   Phone,
   Compass
 } from 'lucide-react';
+import { firstValidationError, isPhilippineMobile, isWholeNumber, sanitizePhone } from '../utils/validation';
 
 export default function DonorDashboard() {
   const navigate = useNavigate();
@@ -45,6 +46,7 @@ export default function DonorDashboard() {
   const [showAlert, setShowAlert] = useState(true);
   const [requestSubmitted, setRequestSubmitted] = useState(false);
   const [lastRefNo, setLastRefNo] = useState('');
+  const [requestError, setRequestError] = useState('');
   
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
@@ -191,8 +193,28 @@ export default function DonorDashboard() {
     };
   }, [tab]);
 
-  const submitRequest = () => {
-    const ref = addBloodRequest(reqForm);
+  const submitRequest = async () => {
+    const error = firstValidationError([
+      ['Enter the patient’s full name.', reqForm.patientName.trim().length >= 3],
+      ['Enter a valid patient age from 0 to 130.', Number.isInteger(Number(reqForm.patientAge)) && Number(reqForm.patientAge) >= 0 && Number(reqForm.patientAge) <= 130],
+      ['Select the patient blood type.', Boolean(reqForm.patientBloodType)],
+      ['Enter a whole number of bags from 1 to 50.', isWholeNumber(reqForm.units) && Number(reqForm.units) <= 50],
+      ['Enter the clinical diagnosis.', reqForm.diagnosis.trim().length >= 3],
+      ['Select the hospital and blood center.', Boolean(reqForm.hospital && reqForm.bloodCenter)],
+      ['Enter the attending physician’s name.', reqForm.physician.trim().length >= 3],
+      ['Select the urgency level and date needed.', Boolean(reqForm.urgency && reqForm.dateNeeded)],
+      ['The date needed cannot be in the past.', new Date(`${reqForm.dateNeeded}T00:00:00`) >= new Date(new Date().toDateString())],
+      ['Enter the attending contact name and a valid Philippine mobile number.', reqForm.contactPerson.trim().length >= 3 && isPhilippineMobile(reqForm.contactNumber)],
+    ]);
+    if (error) { setRequestError(error); return; }
+    setRequestError('');
+    let ref;
+    try {
+      ref = await addBloodRequest(reqForm);
+    } catch (requestError) {
+      setRequestError(requestError?.data?.message || requestError?.message || 'Your request could not be submitted. Please correct the information and try again.');
+      return;
+    }
     setLastRefNo(ref);
     setRequestSubmitted(true);
     setReqForm({
@@ -864,7 +886,8 @@ export default function DonorDashboard() {
                               type="tel" 
                               className="w-full border border-slate-200 rounded-lg px-3.5 py-2.5 text-xs focus:border-slate-800 focus:ring-1 focus:ring-slate-800 transition outline-none bg-slate-50/45"
                               value={reqForm.contactNumber}
-                              onChange={(e) => setReqForm({ ...reqForm, contactNumber: e.target.value })}
+                              inputMode="numeric" maxLength={13}
+                              onChange={(e) => setReqForm({ ...reqForm, contactNumber: sanitizePhone(e.target.value) })}
                             />
                           </div>
                           <div className="col-span-2">
@@ -892,6 +915,7 @@ export default function DonorDashboard() {
                       >
                         Submit Referral Request
                       </button>
+                      {requestError && <p role="alert" className="text-xs font-semibold text-rose-600">{requestError}</p>}
                     </div>
                   </div>
                 )}

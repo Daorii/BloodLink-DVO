@@ -6,6 +6,7 @@ import { apiGetDonors, apiCreateDonor, apiUpdateDonor, apiDeleteDonor } from '..
 import { apiGetDonationEvents, apiCreateDonationEvent, apiUpdateDonationEvent, apiDeleteDonationEvent } from '../services/api';
 import { apiCreateDonation, apiGetDonations, apiUpdateDonationOutcome } from '../services/api';
 import { apiCreateLabResult, apiGetLabResults, apiGetDonationBySerial } from '../services/api';
+import { apiGetRecalls, apiCreateRecall, apiCreateBulkRecalls } from '../services/api';
 import { apiGetBloodRequests, apiCreateBloodRequest, apiUpdateBloodRequestStatus } from '../services/api';
 import { apiGetBloodIssuances, apiCreateBloodIssuance, apiApproveBloodRelease } from '../services/api';
 import { apiGetBloodInventory, apiCreateBloodInventory } from '../services/api';
@@ -570,17 +571,8 @@ export const useBloodStore = create(
           { id: 'USR-008', name: 'Engr. Miguel Reyes',       role: 'Production Staff',    email: 'production@bloodlink.dvo', status: 'Active', hospitalId: null },
         ];
 
-        if (password === DEV_PASSWORD) {
-          const emailLower = email.toLowerCase();
-          const devUser = MOCK_ROSTER.find(u => u.email.toLowerCase() === emailLower);
-          if (devUser) {
-            console.info('[BloodLink] DEV bypass — logged in as:', devUser.role);
-            set({ authSystemUser: devUser });
-            return devUser;
-          }
-        }
-
-        // ── Try Laravel API (real credentials) ──
+        // ── Try Laravel API first so protected operations (including PhilSMS
+        // recalls) receive a Sanctum token. ──
         try {
           const data = await apiLogin(email, password);
           if (data.user && data.token) {
@@ -589,6 +581,17 @@ export const useBloodStore = create(
           }
         } catch (err) {
           console.warn('[BloodLink] API login failed, using local fallback:', err.message);
+        }
+
+        // ── DEV fallback when the Laravel API is unavailable ──
+        if (password === DEV_PASSWORD) {
+          const emailLower = email.toLowerCase();
+          const devUser = MOCK_ROSTER.find(u => u.email.toLowerCase() === emailLower);
+          if (devUser) {
+            console.info('[BloodLink] DEV fallback — logged in as:', devUser.role);
+            set({ authSystemUser: devUser });
+            return devUser;
+          }
         }
 
         // ── Last resort: persisted local users array ──
@@ -643,7 +646,10 @@ export const useBloodStore = create(
         try {
           const data = await apiCreateHospital(form);
           if (data.hospital) { set((s) => ({ hospitals: [...s.hospitals, data.hospital] })); return; }
-        } catch (err) { console.error('[BloodLink] API createHospital failed:', err.message, err.status || ''); }
+        } catch (err) {
+          if (err?.status && err.status < 500) throw err;
+          console.error('[BloodLink] API createHospital failed:', err.message, err.status || '');
+        }
         const id = 'HOSP-' + String(Date.now()).slice(-4);
         set((s) => ({ hospitals: [...s.hospitals, { id, ...form }] }));
       },
@@ -654,7 +660,10 @@ export const useBloodStore = create(
           try {
             const data = await apiUpdateHospital(numericId, form);
             if (data.hospital) { set((s) => ({ hospitals: s.hospitals.map(h => h.id === id ? { ...h, ...data.hospital } : h) })); return; }
-          } catch (err) { console.error('[BloodLink] API updateHospital failed:', err.message, err.status || ''); }
+          } catch (err) {
+            if (err?.status && err.status < 500) throw err;
+            console.error('[BloodLink] API updateHospital failed:', err.message, err.status || '');
+          }
         }
         set((s) => ({ hospitals: s.hospitals.map(h => h.id === id ? { ...h, ...form } : h) }));
       },
@@ -700,10 +709,41 @@ export const useBloodStore = create(
           const data = await apiCreateDonor(payload);
           if (data.donor) { set((s) => ({ donors: [data.donor, ...s.donors] })); return; }
         } catch (err) {
+          if (err?.status && err.status < 500) throw err;
           console.error('[BloodLink] API createDonor failed, using local fallback:', err.message, err.status || '', err.data || '');
         }
         // Fallback: local-only
         set((state) => ({ donors: [newDonor, ...state.donors] }));
+      },
+
+      // Registry profile edits only. Medical eligibility and donation outcomes use
+      // their separate clinical workflow and are intentionally not changed here.
+      updateDonor: async (id, changes) => {
+        const numericId = parseInt(String(id).replace(/\D/g, ''), 10);
+        const payload = {
+          firstName:     changes.firstName,
+          middleName:    changes.middleName || null,
+          lastName:      changes.lastName,
+          sex:           changes.sex,
+          civilStatus:   changes.civilStatus,
+          dob:           changes.dob,
+          address:       changes.address,
+          contactNumber: changes.contactNumber,
+          email:         changes.email || null,
+        };
+
+        if (Number.isNaN(numericId)) return { success: false, error: 'Invalid donor record.' };
+        try {
+          const data = await apiUpdateDonor(numericId, payload);
+          if (data.donor) {
+            set(state => ({ donors: state.donors.map(donor => donor.id === id ? data.donor : donor) }));
+            return { success: true, donor: data.donor };
+          }
+          return { success: false, error: 'The server did not return the updated donor.' };
+        } catch (err) {
+          console.error('[BloodLink] updateDonor failed:', err.message, err.status || '');
+          return { success: false, error: err.message || 'Could not update donor.' };
+        }
       },
 
       fetchDonationEventsFromAPI: async () => {
@@ -810,6 +850,7 @@ export const useBloodStore = create(
             return data.donationEvent;
           }
         } catch (err) {
+          if (err?.status && err.status < 500) throw err;
           console.error('[BloodLink] API createDonationEvent failed:', err.message, err.status || '');
         }
 
@@ -840,6 +881,7 @@ export const useBloodStore = create(
               return;
             }
           } catch (err) {
+            if (err?.status && err.status < 500) throw err;
             console.error('[BloodLink] API updateDonationEvent failed:', err.message);
           }
         }
@@ -1159,6 +1201,7 @@ export const useBloodStore = create(
             });
             apiSucceeded = true;
           } catch (err) {
+            if (err?.status && err.status < 500) throw err;
             console.error('[BloodLink] API createLabResult failed:', err.message, err.status || '');
           }
         }
@@ -1250,32 +1293,18 @@ export const useBloodStore = create(
       addUser: async (userForm) => {
         const now = new Date();
 
-        // Resolve hospital details locally if Hospital User
+        // Hospital affiliation identifies the facility only. It must never copy
+        // a hospital contact into a distinct user account.
         const state = get();
-        let finalFirstName = userForm.firstName || '';
-        let finalLastName  = userForm.lastName  || '';
-        let finalEmail     = userForm.email     || '';
-        let finalContact   = userForm.contactNumber || '';
-        let updatedHospitals = state.hospitals;
-
-        if (userForm.role === 'Hospital User' && userForm.hospitalId) {
-          const hosp = state.hospitals.find(h => h.id === userForm.hospitalId);
-          if (hosp) {
-            const parts = (hosp.contact || 'Hospital Admin').split(' ');
-            finalFirstName = parts[0] || 'Hospital';
-            finalLastName  = parts.slice(1).join(' ') || 'Admin';
-            finalEmail     = hosp.email  || finalEmail;
-            finalContact   = hosp.phone  || finalContact;
-            updatedHospitals = state.hospitals.map(h =>
-              h.id === userForm.hospitalId ? { ...h, registrationStatus: 'Active' } : h
-            );
-          }
-        }
+        const finalFirstName = userForm.firstName || '';
+        const finalLastName  = userForm.lastName  || '';
+        const finalEmail     = userForm.email     || '';
+        const finalContact   = userForm.contactNumber || '';
 
         const payload = {
           firstName: finalFirstName, lastName: finalLastName,
           email: finalEmail, contactNumber: finalContact,
-          password: userForm.password || 'pass123',
+          password: userForm.passwordHash || userForm.password || '',
           role: userForm.role || 'Registry Staff',
           status: userForm.status || 'Active',
           hospitalId: userForm.hospitalId || null,
@@ -1287,19 +1316,20 @@ export const useBloodStore = create(
           if (data.user) {
             set((s) => ({
               users: [...s.users, data.user],
-              hospitals: updatedHospitals,
               auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: s.authSystemUser?.id || 'USR-001', action: `Created new system user ${data.user.name} (${data.user.role})`, module: 'User Management', recordId: data.user.id, oldValue: null, newValue: JSON.stringify({ id: data.user.id, role: data.user.role, email: data.user.email }), performedAt: now.toLocaleString() }, ...s.auditLogs]
             }));
             return;
           }
         } catch (err) {
+          // A validation rejection must never be turned into a local success.
+          if (err?.status && err.status < 500) throw err;
           console.error('[BloodLink] API createUser failed, using local fallback:', err.message, err.status || '', err.data || '');
         }
 
         // ── Fallback: local-only ──
         const id = 'USR-' + String(Math.floor(Math.random() * 900) + 100);
         const newUser = { id, roleId: userForm.roleId || null, firstName: finalFirstName, lastName: finalLastName, name: `${finalFirstName} ${finalLastName}`.trim(), email: finalEmail, contactNumber: finalContact, status: userForm.status || 'Active', role: userForm.role || 'Registry Staff', hospitalId: userForm.hospitalId || null, createdAt: now.toLocaleString(), updatedAt: now.toLocaleString() };
-        set((s) => ({ users: [...s.users, newUser], hospitals: updatedHospitals, auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: s.authSystemUser?.id || 'USR-001', action: `Created new system user ${newUser.name} (${newUser.role})`, module: 'User Management', recordId: id, oldValue: null, newValue: JSON.stringify({ id, role: newUser.role, email: newUser.email }), performedAt: now.toLocaleString() }, ...s.auditLogs] }));
+        set((s) => ({ users: [...s.users, newUser], auditLogs: [{ logId: 'LOG-' + Math.floor(100 + Math.random() * 900), userId: s.authSystemUser?.id || 'USR-001', action: `Created new system user ${newUser.name} (${newUser.role})`, module: 'User Management', recordId: id, oldValue: null, newValue: JSON.stringify({ id, role: newUser.role, email: newUser.email }), performedAt: now.toLocaleString() }, ...s.auditLogs] }));
       },
 
       updateUser: async (userId, updatedFields) => {
@@ -1320,6 +1350,7 @@ export const useBloodStore = create(
               return;
             }
           } catch (err) {
+            if (err?.status && err.status < 500) throw err;
             console.error('[BloodLink] API updateUser failed, using local fallback:', err.message, err.status || '', err.data || '');
           }
         }
@@ -1396,6 +1427,7 @@ export const useBloodStore = create(
             } catch (_) { /* fall through to local add below */ }
           }
         } catch (err) {
+          if (err?.status && err.status < 500) throw err;
           console.error('[BloodLink] API createBloodRequest failed:', err.message);
         }
 
@@ -1803,7 +1835,7 @@ export const useBloodStore = create(
       // Fetch all recall records from API
       fetchRecallsFromAPI: async () => {
         try {
-          const { data } = await api.get('/recalls');
+          const data = await apiGetRecalls();
           if (data.recalls) set({ recalls: data.recalls });
         } catch (e) {
           console.error('fetchRecallsFromAPI error:', e);
@@ -1813,7 +1845,7 @@ export const useBloodStore = create(
       dispatchRecallSMS: async (donorId, processedBy = null) => {
         try {
           const numericId = parseInt(String(donorId).replace(/^D0*/i, ''), 10);
-          const { data } = await api.post('/recalls', {
+          const data = await apiCreateRecall({
             donor_id: numericId,
             recall_reason: 'Critical Shortage Match',
           });
@@ -1840,7 +1872,7 @@ export const useBloodStore = create(
       dispatchBulkRecallSMS: async (donorIds, processedBy = null) => {
         try {
           const numericIds = donorIds.map(id => parseInt(String(id).replace(/^D0*/i, ''), 10));
-          const { data } = await api.post('/recalls/bulk', {
+          const data = await apiCreateBulkRecalls({
             donor_ids: numericIds,
             recall_reason: 'Critical Shortage Match',
           });

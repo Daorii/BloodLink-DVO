@@ -51,8 +51,8 @@ class HospitalController extends Controller
         $validated = $request->validate([
             'name'               => 'required|string|max:150',
             'type'               => 'required|string|in:Government,Private,Blood Bank',
-            'contact'            => 'nullable|string|max:100',
-            'phone'              => 'nullable|string|max:20',
+            'contact'            => 'required|string|max:100',
+            'phone'              => ['required', 'string', 'regex:/^(?:\+63|63|0)9\d{9}$/'],
             'email'              => 'nullable|email|max:100',
             'address'            => 'required|string',
             'registrationStatus' => 'nullable|string|in:Active,Pending,Suspended',
@@ -87,8 +87,8 @@ class HospitalController extends Controller
         $validated = $request->validate([
             'name'               => 'sometimes|required|string|max:150',
             'type'               => 'sometimes|required|string|in:Government,Private,Blood Bank',
-            'contact'            => 'nullable|string|max:100',
-            'phone'              => 'nullable|string|max:20',
+            'contact'            => 'sometimes|required|string|max:100',
+            'phone'              => ['sometimes', 'required', 'string', 'regex:/^(?:\+63|63|0)9\d{9}$/'],
             'email'              => 'nullable|email|max:100',
             'address'            => 'sometimes|required|string',
             'registrationStatus' => 'nullable|string|in:Active,Pending,Suspended',

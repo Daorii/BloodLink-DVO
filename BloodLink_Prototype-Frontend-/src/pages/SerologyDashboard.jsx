@@ -149,7 +149,14 @@ export default function SerologyDashboard() {
 
   const handleSave = async () => {
     if (!form.serialNumber) { setSaveError('Serial number is required.'); return; }
+    if (lookupStatus !== 'found') { setSaveError('Look up a valid donation serial number before saving results.'); return; }
     if (lookupStatus === 'already-done') { setSaveError('Lab results already recorded for this serial number.'); return; }
+    if (!form.bloodTypeConfirmed) { setSaveError('Select the confirmed blood type.'); return; }
+    if (!Number.isFinite(Number(form.hemoglobinResult)) || Number(form.hemoglobinResult) < 5 || Number(form.hemoglobinResult) > 25) { setSaveError('Enter a valid hemoglobin result between 5 and 25 g/dL.'); return; }
+    const hasNonClearTtiResult = TTI_TESTS.some(({ key }) => form[key] !== 'Non-Reactive');
+    if (hasNonClearTtiResult && form.screeningOutcome === 'Accepted') { setSaveError('A donation with a Reactive or Indeterminate TTI result cannot be marked Accepted. Select an appropriate deferral outcome.'); return; }
+    if (!hasNonClearTtiResult && form.screeningOutcome !== 'Accepted') { setSaveError('Use Accepted when all TTI results are Non-Reactive.'); return; }
+    if (form.screeningOutcome !== 'Accepted' && !form.deferralReason.trim()) { setSaveError('A deferral reason is required for a deferred donation.'); return; }
     setSaving(true); setSaveError('');
     try {
       await addLabTestResult({ ...form, screeningOutcome: form.screeningOutcome });
@@ -436,7 +443,8 @@ export default function SerologyDashboard() {
                     <input type="text" placeholder="e.g. 2026-0042"
                       className="w-full pl-8 pr-3 border border-slate-200 rounded-lg py-2 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-300"
                       value={form.serialNumber}
-                      onChange={e => { setForm(prev => ({ ...prev, serialNumber: e.target.value })); setLookupStatus('idle'); }}
+                      maxLength={30}
+                      onChange={e => { setForm(prev => ({ ...prev, serialNumber: e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '') })); setLookupStatus('idle'); }}
                       onBlur={e => handleSerialLookup(e.target.value)} />
                   </div>
                   <button type="button" onClick={() => handleSerialLookup(form.serialNumber)}
@@ -474,14 +482,15 @@ export default function SerologyDashboard() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Blood Type (Confirmed)</label>
-                    <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-rose-700 focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    <select required className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-rose-700 focus:outline-none focus:ring-2 focus:ring-purple-300"
                       value={form.bloodTypeConfirmed} onChange={e => setForm(prev => ({ ...prev, bloodTypeConfirmed: e.target.value }))}>
+                      <option value="">Select confirmed type</option>
                       {BLOOD_TYPES.map(b => <option key={b} value={b}>{b}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Hemoglobin (g/dL)</label>
-                    <input type="number" step="0.1" min="0" placeholder="e.g. 14.5"
+                    <input required type="number" step="0.1" min="5" max="25" placeholder="e.g. 14.5"
                       className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-300"
                       value={form.hemoglobinResult} onChange={e => setForm(prev => ({ ...prev, hemoglobinResult: e.target.value }))} />
                   </div>
@@ -532,7 +541,7 @@ export default function SerologyDashboard() {
                   {form.screeningOutcome !== 'Accepted' && (
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Deferral Reason</label>
-                      <input type="text" placeholder="e.g. Reactive HBsAg"
+                      <input required type="text" maxLength={255} placeholder="e.g. Reactive HBsAg"
                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-300"
                         value={form.deferralReason} onChange={e => setForm(prev => ({ ...prev, deferralReason: e.target.value }))} />
                     </div>

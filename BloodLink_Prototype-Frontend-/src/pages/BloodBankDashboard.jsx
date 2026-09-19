@@ -40,6 +40,7 @@ export default function BloodBankDashboard() {
   const [showUnitForm, setShowUnitForm] = useState(false);
   const [unitForm, setUnitForm] = useState(emptyUnitForm);
   const [unitSaved, setUnitSaved] = useState(false);
+  const [unitError, setUnitError] = useState('');
   const [donationSearch, setDonationSearch] = useState('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('All');
   const [successModal, setSuccessModal] = useState({ isOpen: false, title: '', message: '' });
@@ -73,6 +74,11 @@ export default function BloodBankDashboard() {
 
   const handleProcess = async () => {
     if (!processingReq) return;
+    const invalidItem = processItems.find(item => !Number.isInteger(Number(item.quantityIssued)) || Number(item.quantityIssued) < 0 || Number(item.quantityIssued) > Number(item.requested));
+    if (invalidItem || processItems.every(item => Number(item.quantityIssued) <= 0)) {
+      setSuccessModal({ isOpen: true, title: 'Check Issuance Quantities', message: invalidItem ? 'Each issued quantity must be a whole number from 0 up to the requested quantity.' : 'At least one blood unit must be issued.' });
+      return;
+    }
     setProcessing(true);
     const result = await processBloodRequest({
       requestId:  processingReq.requestId,
@@ -95,6 +101,13 @@ export default function BloodBankDashboard() {
 
   const handleUnitSubmit = (e) => {
     e.preventDefault();
+    const error = !unitForm.donationId ? 'Select a valid donation before recording a blood unit.'
+      : !Number.isFinite(Number(unitForm.quantity)) || Number(unitForm.quantity) <= 0 ? 'Enter a valid volume greater than zero.'
+      : !unitForm.collectionDate || !unitForm.expirationDate ? 'Collection and expiration dates are required.'
+      : new Date(`${unitForm.collectionDate}T00:00:00`) > new Date() ? 'Collection date cannot be in the future.'
+      : new Date(`${unitForm.expirationDate}T00:00:00`) <= new Date(`${unitForm.collectionDate}T00:00:00`) ? 'Expiration date must be after the collection date.' : '';
+    if (error) { setUnitError(error); return; }
+    setUnitError('');
     recordBloodUnit(unitForm);
     setUnitSaved(true);
     setTimeout(() => { setUnitSaved(false); setUnitForm(emptyUnitForm); setShowUnitForm(false); setDonationSearch(''); }, 2000);
@@ -1079,6 +1092,11 @@ export default function BloodBankDashboard() {
               {unitSaved && (
                 <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-lg p-3 flex items-center gap-2">
                   <CheckCircle className="w-4 h-4" /> Unit recorded successfully! Inventory updated.
+                </div>
+              )}
+              {unitError && (
+                <div role="alert" className="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-lg p-3 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" /> {unitError}
                 </div>
               )}
 

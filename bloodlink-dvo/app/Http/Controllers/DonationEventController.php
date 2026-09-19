@@ -45,7 +45,7 @@ class DonationEventController extends Controller
         $v = $request->validate([
             'province'             => 'sometimes|required|string|max:100',
             'cityMunicipality'     => 'sometimes|required|string|max:100',
-            'barangayOrganization' => 'nullable|string|max:100',
+            'barangayOrganization' => 'sometimes|required|string|max:100',
             'eventDate'            => 'sometimes|required|date',
         ]);
 

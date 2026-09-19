@@ -48,15 +48,15 @@ class BloodInventoryController extends Controller
             'unitCode'        => 'nullable|string|max:50',
             'bloodType'       => 'required|string|in:' . implode(',', self::VALID_BLOOD_TYPES),
             'component'       => 'required|string|in:' . implode(',', self::VALID_COMPONENTS),
-            'volumeCC'        => 'required|numeric|min:0',
-            'collectionDate'  => 'required|date',
+            'volumeCC'        => 'required|numeric|gt:0',
+            'collectionDate'  => 'required|date|before_or_equal:today',
             'expirationDate'  => 'required|date|after:collectionDate',
             'safetyStatus'    => 'nullable|string|in:' . implode(',', self::VALID_SAFETY),
             'intendedUse'     => 'nullable|string|in:' . implode(',', self::VALID_INTENDED_USE),
             'inventoryStatus' => 'nullable|string|in:' . implode(',', self::VALID_STATUS),
             // Non-cleared status documentation
             'remarks'         => 'nullable|string|max:500',
-            'statusDate'      => 'nullable|date',
+            'statusDate'      => 'nullable|date|before_or_equal:today',
         ]);
 
         // Server-side volume range soft-validation:

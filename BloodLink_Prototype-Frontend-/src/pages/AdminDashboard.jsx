@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { useBloodStore } from '../store/useBloodStore';
 import L from 'leaflet';
@@ -103,6 +104,7 @@ import snbcLogo from '../assets/bloodlinks_logo/snbc-removebg-preview.png';
 import davaoLogo from '../assets/bloodlinks_logo/davao-logo.png';
 import ConfirmationModal from '../components/ConfirmationModal';
 import SuccessModal from '../components/SuccessModal';
+import { isPhilippineMobile, isValidEmail, sanitizePhone } from '../utils/validation';
 const BLOOD_TYPES = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
 const COMPONENTS = ['PRBC', 'Platelet Concentrate', 'FFP', 'Cryoprecipitate', 'Cryosupernate'];
 
@@ -116,7 +118,12 @@ export default function AdminDashboard() {
   // Zustand State
   const donors = useBloodStore((state) => state.donors);
   const inventory = useBloodStore((state) => state.inventory);
+  const bloodInventory = useBloodStore((state) => state.bloodInventory) ?? [];
   const bloodRequests = useBloodStore((state) => state.bloodRequests);
+  const donations = useBloodStore((state) => state.donations) ?? [];
+  const labTestResults = useBloodStore((state) => state.labTestResults) ?? [];
+  const bloodIssuances = useBloodStore((state) => state.bloodIssuances) ?? [];
+  const recalls = useBloodStore((state) => state.recalls) ?? [];
   const hospitals = useBloodStore((state) => state.hospitals);
   const users = useBloodStore((state) => state.users);
   const forecastData = useBloodStore((state) => state.forecastData);
@@ -140,8 +147,15 @@ export default function AdminDashboard() {
   const addUser = useBloodStore((state) => state.addUser);
   const updateUser = useBloodStore((state) => state.updateUser);
   const fetchUsersFromAPI = useBloodStore((state) => state.fetchUsersFromAPI);
+  const fetchDonorsFromAPI = useBloodStore((state) => state.fetchDonorsFromAPI);
   const fetchHospitalsFromAPI = useBloodStore((state) => state.fetchHospitalsFromAPI);
   const fetchDonationEventsFromAPI = useBloodStore((state) => state.fetchDonationEventsFromAPI);
+  const fetchBloodInventoryFromAPI = useBloodStore((state) => state.fetchBloodInventoryFromAPI);
+  const fetchBloodRequestsFromAPI = useBloodStore((state) => state.fetchBloodRequestsFromAPI);
+  const fetchDonationsFromAPI = useBloodStore((state) => state.fetchDonationsFromAPI);
+  const fetchLabResultsFromAPI = useBloodStore((state) => state.fetchLabResultsFromAPI);
+  const fetchBloodIssuancesFromAPI = useBloodStore((state) => state.fetchBloodIssuancesFromAPI);
+  const fetchRecallsFromAPI = useBloodStore((state) => state.fetchRecallsFromAPI);
   const addBloodRequest = useBloodStore((state) => state.addBloodRequest);
   const approveRequest = useBloodStore((state) => state.approveRequest);
   const recommendations = useBloodStore((state) => state.recommendations);
@@ -156,11 +170,18 @@ export default function AdminDashboard() {
   const updateDonationEvent = useBloodStore((state) => state.updateDonationEvent);
   const deleteDonationEvent = useBloodStore((state) => state.deleteDonationEvent);
 
-  // Fetch users and hospitals from the Laravel API when the dashboard loads
+  // Dashboard data is read-only, but must reflect the authoritative API records.
   useEffect(() => {
     fetchUsersFromAPI();
+    fetchDonorsFromAPI();
     fetchHospitalsFromAPI();
     fetchDonationEventsFromAPI();
+    fetchBloodInventoryFromAPI();
+    fetchBloodRequestsFromAPI();
+    fetchDonationsFromAPI();
+    fetchLabResultsFromAPI();
+    fetchBloodIssuancesFromAPI();
+    fetchRecallsFromAPI();
   }, []);
 
   // Role Detection
@@ -213,6 +234,17 @@ export default function AdminDashboard() {
   const [distHospitalFilter, setDistHospitalFilter] = useState('ALL');
   const [emergencyBloodType, setEmergencyBloodType] = useState(null);
   const [selectedInventoryType, setSelectedInventoryType] = useState(null);
+  // Read-only Admin inventory filters. These mirror the Issuance component view
+  // without exposing any workflow controls for changing a blood bag.
+  const [adminInventoryBloodType, setAdminInventoryBloodType] = useState('All');
+  const [adminInventoryComponent, setAdminInventoryComponent] = useState('All');
+  const [adminInventorySearch, setAdminInventorySearch] = useState('');
+  const [adminIssuanceStatus, setAdminIssuanceStatus] = useState('All');
+  const [adminIssuanceSearch, setAdminIssuanceSearch] = useState('');
+  const [selectedAdminRequest, setSelectedAdminRequest] = useState(null);
+  const [adminDonorBloodType, setAdminDonorBloodType] = useState('All');
+  const [adminDonorEligibility, setAdminDonorEligibility] = useState('All');
+  const [selectedAdminDonor, setSelectedAdminDonor] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRequestNote, setSelectedRequestNote] = useState('');
   const [selectedRequestRef, setSelectedRequestRef] = useState('');
@@ -263,7 +295,7 @@ export default function AdminDashboard() {
   // Edit User modal
   const [showEditUserModal, setShowEditUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [editUserForm, setEditUserForm] = useState({ firstName: '', lastName: '', email: '', contactNumber: '', role: 'Registry Staff', roleId: 'ROLE-003', status: 'Active' });
+  const [editUserForm, setEditUserForm] = useState({ firstName: '', lastName: '', email: '', contactNumber: '', role: 'Registry Staff', roleId: 'ROLE-003', status: 'Active', hospitalId: '' });
   const [editUserSaved, setEditUserSaved] = useState(false);
 
   // Direct Create Issuance Modal State
@@ -304,6 +336,45 @@ export default function AdminDashboard() {
   const totalUnits = inventory.reduce((sum, item) => sum + item.units, 0);
   const criticalCount = inventory.filter((item) => item.status === 'critical').length;
   const pendingRequests = bloodRequests.filter((r) => r.status === 'Pending').length;
+
+  // Read-only oversight metrics. These intentionally use individual inventory
+  // records instead of the retired aggregate inventory fixture.
+  const availableUnits = bloodInventory.filter(unit =>
+    unit.inventoryStatus === 'Available' &&
+    unit.safetyStatus === 'Cleared' &&
+    unit.intendedUse === 'Transfusable'
+  );
+  const heldUnits = bloodInventory.filter(unit =>
+    ['Hold-Quarantined', 'NCU', 'NS'].includes(unit.safetyStatus)
+  );
+  const today = new Date();
+  const expiringUnits = availableUnits.filter(unit => {
+    const expiry = new Date(unit.expirationDate);
+    const days = Math.ceil((expiry - today) / 86400000);
+    return days >= 0 && days <= 7;
+  });
+  const openRequests = bloodRequests.filter(request =>
+    !['Released', 'Fulfilled', 'Rejected', 'Declined'].includes(request.status)
+  );
+  const urgentRequests = openRequests.filter(request =>
+    ['Urgent', 'Emergency'].includes(String(request.urgency).replace(/^./, c => c.toUpperCase()))
+  );
+  const inventoryGroups = Object.values(availableUnits.reduce((groups, unit) => {
+    const key = `${unit.bloodType}|${unit.component}`;
+    groups[key] = groups[key] || { key, bloodType: unit.bloodType, component: unit.component, units: 0 };
+    groups[key].units += 1;
+    return groups;
+  }, {})).sort((a, b) => a.units - b.units || a.bloodType.localeCompare(b.bloodType)).slice(0, 6);
+  const recordedLabDonationIds = new Set(labTestResults.map(result => String(result.donationId)));
+  const pendingSerology = donations.filter(donation => !recordedLabDonationIds.has(String(donation.donationId))).length;
+  const acceptedDonations = donations.filter(donation => donation.screeningOutcome === 'Accepted');
+  const producedDonationIds = new Set(bloodInventory.filter(unit => unit.donationId).map(unit => String(unit.donationId)));
+  const awaitingProduction = acceptedDonations.filter(donation => !producedDonationIds.has(String(donation.donationId))).length;
+  const failedRecalls = recalls.filter(recall => recall.smsStatus === 'Failed').length;
+  const nextWeekForecasts = granularForecasts
+    .filter(forecast => forecast.weeksAhead === 1)
+    .sort((a, b) => b.predictedDemand - a.predictedDemand)
+    .slice(0, 3);
 
   const tabTitles = {
     dashboard: 'Dashboard Overview',
@@ -812,13 +883,13 @@ export default function AdminDashboard() {
             <p className="text-xs text-slate-400 font-medium">{tabSubs[tab]}</p>
           </div>
           <div className="flex items-center gap-4">
-            {criticalCount > 0 && (
+            {urgentRequests.length > 0 && (
               <button
-                onClick={() => setTab('mobilize')}
+                onClick={() => setTab('issuance')}
                 className="flex items-center gap-1.5 bg-rose-50 border border-rose-100 px-3.5 py-1.5 rounded-lg text-xs font-bold text-[#C21C24] hover:bg-rose-100/50 transition"
               >
                 <AlertTriangle className="w-4 h-4" />
-                <span>Urgent: O- Stock Critical</span>
+                <span>{urgentRequests.length} urgent request{urgentRequests.length === 1 ? '' : 's'} to review</span>
               </button>
             )}
             <div className="h-8 w-px bg-slate-200"></div>
@@ -839,32 +910,122 @@ export default function AdminDashboard() {
           {tab === 'dashboard' && (
             <div className="fade-in space-y-6">
 
-              {/* Quick stats grids */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Total Stock</p>
-                  <p className="text-2xl font-extrabold text-slate-900 font-mono">{totalUnits} units</p>
-                  <p className="text-[10px] text-slate-450 mt-1 font-semibold">Across all type reserves</p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Regional oversight</p>
+                  <h2 className="mt-1 text-lg font-extrabold tracking-tight text-slate-900">Today’s blood service position</h2>
+                  <p className="mt-1 text-xs text-slate-500">Live, read-only view of inventory, requests, and workflow exceptions.</p>
                 </div>
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-                  <p className="text-[10px] text-slate-450 font-bold uppercase tracking-wider mb-1">Active Donors</p>
-                  <p className="text-2xl font-extrabold text-slate-900 font-mono">1,247</p>
-                  <p className="text-[10px] text-slate-450 mt-1 font-semibold">Davao City regional pool</p>
-                </div>
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Critical Deficits</p>
-                  <p className="text-2xl font-extrabold text-[#C21C24] font-mono">{criticalCount}</p>
-                  <p className="text-[10px] text-slate-450 mt-1 font-semibold">Below safety reserves</p>
-                </div>
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Eligible Pool</p>
-                  <p className="text-2xl font-extrabold text-emerald-600 font-mono">312</p>
-                  <p className="text-[10px] text-slate-450 mt-1 font-semibold">Ready for dispatch matching</p>
-                </div>
+                <span className="text-[10px] font-semibold text-slate-400">Refreshed when this page opened</span>
               </div>
 
-              {/* Progress stock grids */}
-              <div className="grid lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+                {[
+                  { label: 'Usable units', value: availableUnits.length, detail: 'Cleared and transfusable', tone: 'text-emerald-600' },
+                  { label: 'Hold / NCU units', value: heldUnits.length, detail: 'Not available for release', tone: 'text-amber-600' },
+                  { label: 'Expiring in 7 days', value: expiringUnits.length, detail: 'Available units requiring review', tone: expiringUnits.length ? 'text-rose-600' : 'text-slate-900' },
+                  { label: 'Urgent requests open', value: urgentRequests.length, detail: `${openRequests.length} total request(s) in progress`, tone: urgentRequests.length ? 'text-rose-600' : 'text-slate-900' },
+                ].map(card => (
+                  <div key={card.label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{card.label}</p>
+                    <p className={`mt-2 font-mono text-2xl font-extrabold ${card.tone}`}>{card.value}</p>
+                    <p className="mt-1 text-[10px] font-medium text-slate-500">{card.detail}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-5">
+                <section className="xl:col-span-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">Lowest available components</p>
+                      <p className="mt-0.5 text-[10px] text-slate-500">Cleared, transfusable inventory by blood type and component.</p>
+                    </div>
+                    <button onClick={() => setTab('inventory')} className="text-xs font-bold text-blue-600 hover:text-blue-700">View inventory</button>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {inventoryGroups.length ? inventoryGroups.map(group => (
+                      <div key={group.key} className="flex items-center justify-between gap-4 px-5 py-3.5">
+                        <div className="min-w-0">
+                          <span className="mr-2 rounded bg-rose-50 px-2 py-1 font-mono text-xs font-bold text-rose-700">{group.bloodType}</span>
+                          <span className="text-xs font-semibold text-slate-700">{group.component}</span>
+                        </div>
+                        <span className={`font-mono text-sm font-extrabold ${group.units <= 2 ? 'text-rose-600' : 'text-slate-900'}`}>{group.units} unit{group.units === 1 ? '' : 's'}</span>
+                      </div>
+                    )) : <p className="px-5 py-10 text-center text-xs text-slate-500">No cleared, transfusable inventory records are available.</p>}
+                  </div>
+                </section>
+
+                <section className="xl:col-span-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">Exceptions requiring attention</p>
+                      <p className="mt-0.5 text-[10px] text-slate-500">Read-only operational exception queue.</p>
+                    </div>
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {[
+                      { label: 'Units expiring within 7 days', value: expiringUnits.length, tab: 'inventory', danger: expiringUnits.length > 0 },
+                      { label: 'Urgent or emergency requests open', value: urgentRequests.length, tab: 'issuance', danger: urgentRequests.length > 0 },
+                      { label: 'Donations awaiting serology', value: pendingSerology, tab: 'donors', danger: false },
+                      { label: 'Accepted donations awaiting production', value: awaitingProduction, tab: 'inventory', danger: false },
+                      { label: 'Failed recall messages', value: failedRecalls, tab: 'smslog', danger: failedRecalls > 0 },
+                    ].map(item => (
+                      <button key={item.label} onClick={() => setTab(item.tab)} className="flex w-full items-center justify-between rounded-lg border border-slate-100 px-3 py-2.5 text-left transition hover:border-slate-200 hover:bg-slate-50">
+                        <span className="text-xs font-medium text-slate-600">{item.label}</span>
+                        <span className={`font-mono text-sm font-extrabold ${item.danger ? 'text-rose-600' : 'text-slate-900'}`}>{item.value}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-2">
+                <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">Next-week demand watch</p>
+                      <p className="mt-0.5 text-[10px] text-slate-500">Highest predicted hospital demand from the latest forecast.</p>
+                    </div>
+                    <button onClick={() => setTab('forecasting')} className="text-xs font-bold text-blue-600 hover:text-blue-700">View forecast</button>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {nextWeekForecasts.length ? nextWeekForecasts.map(forecast => (
+                      <div key={forecast.forecastId} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2.5">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-bold text-slate-700">{forecast.hospitalName}</p>
+                          <p className="mt-0.5 text-[10px] text-slate-500">{forecast.bloodTypeId} · {forecast.componentId}</p>
+                        </div>
+                        <span className="whitespace-nowrap font-mono text-sm font-extrabold text-slate-900">{Math.round(forecast.predictedDemand)} units</span>
+                      </div>
+                    )) : <p className="py-8 text-center text-xs text-slate-500">Forecast data has not been generated yet.</p>}
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">Recent system activity</p>
+                      <p className="mt-0.5 text-[10px] text-slate-500">Latest workflow records captured by the system.</p>
+                    </div>
+                    {isSuperAdmin && <button onClick={() => setTab('audit_logs')} className="text-xs font-bold text-blue-600 hover:text-blue-700">View audit logs</button>}
+                  </div>
+                  <div className="mt-4 divide-y divide-slate-100">
+                    {auditLogs.slice(0, 5).map(log => (
+                      <div key={log.logId} className="py-3 first:pt-0">
+                        <p className="text-xs font-semibold text-slate-700">{log.action}</p>
+                        <p className="mt-1 text-[10px] text-slate-400">{log.module} · {log.performedAt}</p>
+                      </div>
+                    ))}
+                    {!auditLogs.length && <p className="py-8 text-center text-xs text-slate-500">No activity records are available yet.</p>}
+                  </div>
+                </section>
+              </div>
+
+              {/* Retained only for existing markup compatibility; the read-only
+                  overview above replaces the retired aggregate inventory cards. */}
+              <div className="hidden">
 
                 {/* Left Progress Stock Bars */}
                 <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col justify-between">
@@ -955,57 +1116,128 @@ export default function AdminDashboard() {
 
           {/* TAB: BLOOD INVENTORY */}
           {tab === 'inventory' && (
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden fade-in">
-              <table className="min-w-full">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-[10px] font-bold text-slate-450 uppercase tracking-wider">Blood Type</th>
-                    <th className="px-6 py-3 text-left text-[10px] font-bold text-slate-450 uppercase tracking-wider">Active Inventory</th>
-                    <th className="px-6 py-3 text-left text-[10px] font-bold text-slate-450 uppercase tracking-wider">Safe Minimum</th>
-                    <th className="px-6 py-3 text-left text-[10px] font-bold text-slate-450 uppercase tracking-wider">Reserves Level</th>
-                    <th className="px-6 py-3 text-left text-[10px] font-bold text-slate-450 uppercase tracking-wider">Status Badge</th>
-                    <th className="px-6 py-3 text-left text-[10px] font-bold text-slate-450 uppercase tracking-wider">Operational Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-650">
-                  {inventory.map((blood) => (
-                    <tr
-                      key={blood.type}
-                      onClick={() => { setSelectedInventoryType(blood.type); setTab('blood_records'); }}
-                      className={`hover:bg-slate-50/30 transition-colors cursor-pointer ${blood.status === 'critical' ? 'bg-rose-50/20' : ''}`}
-                    >
-                      <td className="px-6 py-4"><span className="text-base font-black text-slate-900 font-mono">{blood.type}</span></td>
-                      <td className="px-6 py-4">
-                        <span className={`text-base font-bold font-mono ${blood.status === 'critical' ? 'text-[#C21C24]' : blood.status === 'low' ? 'text-amber-600' : 'text-slate-800'
-                          }`}>{blood.units}</span>
-                        <span className="text-slate-400 font-medium ml-1">units</span>
-                      </td>
-                      <td className="px-6 py-4 text-slate-500 font-mono">{blood.threshold} units</td>
-                      <td className="px-6 py-4 max-w-xs">
-                        <div className="w-full bg-slate-200 rounded-full h-2">
-                          <div
-                            className={`h-2 rounded-full ${blood.status === 'critical' ? 'bg-[#C21C24]' : blood.status === 'low' ? 'bg-amber-400' : 'bg-emerald-500'
-                              }`}
-                            style={{ width: `${Math.min((blood.units / (blood.threshold * 2.5)) * 100, 100)}%` }}
-                          ></div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${blood.status === 'critical' ? 'bg-rose-50 border-rose-100 text-[#C21C24]' :
-                          blood.status === 'low' ? 'bg-amber-50 border-amber-100 text-amber-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'
-                          }`}>
-                          {blood.status === 'critical' ? 'CRITICAL' : blood.status === 'low' ? 'LOWSTOCK' : 'STABLE'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="text-slate-400 font-medium flex items-center gap-1 text-[10px]">
-                          View Donors <ChevronRight className="w-3.5 h-3.5" />
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-6 fade-in">
+              {(() => {
+                const componentColumns = [
+                  { label: 'PRBC (Units)', key: 'PRBC' },
+                  { label: 'Platelets', key: 'Platelet Concentrate' },
+                  { label: 'FFP', key: 'FFP' },
+                  { label: 'Cryoprecipitate', key: 'Cryoprecipitate' },
+                  { label: 'Cryosupernate', key: 'Cryosupernate' },
+                ];
+                const safeThresholds = { 'O+': 50, 'O-': 100, 'A+': 50, 'A-': 50, 'B+': 50, 'B-': 50, 'AB+': 50, 'AB-': 50 };
+                const emergencyReserves = { 'O+': 10, 'O-': 10, 'A+': 10, 'A-': 10, 'B+': 10, 'B-': 10, 'AB+': 5, 'AB-': 5 };
+                const stock = Object.fromEntries(BLOOD_TYPES.map(type => [type, Object.fromEntries(COMPONENTS.map(component => [component, 0]))]));
+                bloodInventory
+                  .filter(unit => unit.inventoryStatus === 'Available')
+                  .forEach(unit => {
+                    const type = unit.bloodType ?? unit.bloodTypeId;
+                    const component = unit.component ?? unit.componentId;
+                    if (stock[type]?.[component] !== undefined) stock[type][component] += 1;
+                  });
+                const filteredUnits = bloodInventory.filter(unit => {
+                  const type = unit.bloodType ?? unit.bloodTypeId;
+                  const component = unit.component ?? unit.componentId;
+                  const query = adminInventorySearch.trim().toLowerCase();
+                  const matchesQuery = !query || [unit.unitId, unit.serialNumber, type, component, unit.inventoryStatus, unit.safetyStatus]
+                    .some(value => String(value ?? '').toLowerCase().includes(query));
+                  return unit.inventoryStatus === 'Available' &&
+                    (adminInventoryBloodType === 'All' || type === adminInventoryBloodType) &&
+                    (adminInventoryComponent === 'All' || component === adminInventoryComponent) && matchesQuery;
+                });
+                const clearFilters = () => {
+                  setAdminInventoryBloodType('All');
+                  setAdminInventoryComponent('All');
+                  setAdminInventorySearch('');
+                };
+                const selectCell = (type, component) => {
+                  if (adminInventoryBloodType === type && adminInventoryComponent === component) clearFilters();
+                  else {
+                    setAdminInventoryBloodType(type);
+                    setAdminInventoryComponent(component);
+                  }
+                };
+                return <>
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">Component Inventory</h3>
+                      <p className="mt-0.5 text-xs text-slate-500">Read-only view of the same available blood-bag registry used by Issuance.</p>
+                    </div>
+                    <button onClick={fetchBloodInventoryFromAPI} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50">
+                      <RefreshCw className="h-3.5 w-3.5" /> Refresh inventory
+                    </button>
+                  </div>
+
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-left text-xs font-semibold">
+                        <thead><tr className="border-b border-slate-200 bg-slate-50 uppercase tracking-wider text-slate-400">
+                          <th className="px-6 py-3 font-bold">Blood Type</th>
+                          {componentColumns.map(column => <th key={column.key} className="border-l border-slate-100 px-6 py-3 text-center font-bold">{column.label}</th>)}
+                          <th className="border-l border-slate-100 px-6 py-3 text-center font-bold">Overall Status</th>
+                        </tr></thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {BLOOD_TYPES.map(type => {
+                            const total = COMPONENTS.reduce((sum, component) => sum + stock[type][component], 0);
+                            const status = total >= safeThresholds[type] ? 'Safe' : total >= emergencyReserves[type] ? 'Low' : 'Critical';
+                            return <tr key={type} className="transition-colors hover:bg-slate-50/50">
+                              <td className="px-6 py-3.5"><span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-slate-100 font-mono text-[10px] font-bold text-slate-700">{type}</span></td>
+                              {componentColumns.map(column => {
+                                const active = adminInventoryBloodType === type && adminInventoryComponent === column.key;
+                                return <td key={column.key} onClick={() => selectCell(type, column.key)} className={`cursor-pointer select-none border-l border-slate-100 px-6 py-3.5 text-center text-sm font-bold transition-colors ${active ? 'bg-[#C21C24] text-white' : 'text-slate-700 hover:bg-rose-50 hover:text-[#C21C24]'}`} title={`Filter available bags: ${type} · ${column.key}`}>
+                                  {stock[type][column.key]}{active && <span className="mt-0.5 block text-[8px] font-normal opacity-80">filtering</span>}
+                                </td>;
+                              })}
+                              <td className="border-l border-slate-100 px-6 py-3.5 text-center"><span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${status === 'Safe' ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : status === 'Low' ? 'border-amber-100 bg-amber-50 text-amber-700' : 'border-rose-100 bg-rose-50 text-[#C21C24]'}`}>
+                                {status === 'Safe' ? <CheckCircle className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}{status}
+                              </span></td>
+                            </tr>;
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    {(adminInventoryBloodType !== 'All' || adminInventoryComponent !== 'All') && <div className="flex items-center gap-2 border-t border-rose-100 bg-rose-50 px-6 py-2 text-[11px] font-semibold text-rose-700">
+                      <span>Filtering registry by:</span>
+                      {adminInventoryBloodType !== 'All' && <span className="rounded border border-rose-200 bg-white px-2 py-0.5 font-mono font-bold">{adminInventoryBloodType}</span>}
+                      {adminInventoryComponent !== 'All' && <span className="rounded border border-rose-200 bg-white px-2 py-0.5 font-bold">{adminInventoryComponent}</span>}
+                      <button onClick={clearFilters} className="ml-auto font-extrabold text-rose-600 hover:text-rose-900">Clear filters</button>
+                    </div>}
+                  </div>
+
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-6 py-4">
+                      <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500"><Database className="h-4 w-4 text-indigo-600" /> Physical Blood Bag Registry</h3>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" /><input value={adminInventorySearch} onChange={event => setAdminInventorySearch(event.target.value)} placeholder="Search unit or serial" className="w-44 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-xs outline-none focus:border-indigo-400" /></div>
+                        <span className="rounded bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">{filteredUnits.length} available bag{filteredUnits.length === 1 ? '' : 's'}</span>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto"><table className="w-full border-collapse text-left text-xs text-slate-650">
+                      <thead><tr className="border-b border-slate-200 bg-slate-50 uppercase tracking-wider text-slate-400">
+                        {['Unit ID', 'Serial No.', 'Type', 'Component', 'Collected', 'Expiry', 'Volume (CC)', 'Safety', 'Status'].map(label => <th key={label} className="px-5 py-3 text-center font-bold first:text-left">{label}</th>)}
+                      </tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filteredUnits.map(unit => {
+                          const expiryDays = unit.expirationDate ? Math.ceil((new Date(unit.expirationDate) - new Date()) / 86400000) : null;
+                          const expiring = expiryDays !== null && expiryDays >= 0 && expiryDays <= 7;
+                          return <tr key={unit.unitId} className="transition-colors hover:bg-slate-50/50">
+                            <td className="px-5 py-3 font-mono font-bold text-slate-900"><span className="rounded border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[11px]">{unit.unitId}</span></td>
+                            <td className="px-5 py-3 font-mono text-[11px] font-bold text-indigo-700">{unit.serialNumber || '—'}</td>
+                            <td className="px-5 py-3 text-center"><span className="rounded border border-rose-100 bg-rose-50 px-1.5 py-0.5 font-mono text-[10px] font-black text-[#C21C24]">{unit.bloodType ?? unit.bloodTypeId}</span></td>
+                            <td className="px-5 py-3 font-bold text-slate-700">{unit.component ?? unit.componentId}</td>
+                            <td className="px-5 py-3 text-center font-mono text-[10px]">{unit.collectionDate || '—'}</td>
+                            <td className={`px-5 py-3 text-center font-mono text-[10px] ${expiring ? 'font-bold text-amber-600' : ''}`}>{unit.expirationDate || '—'}{expiring && <span className="mt-0.5 block text-[9px]">{expiryDays}d left</span>}</td>
+                            <td className="px-5 py-3 text-center font-bold text-slate-800">{unit.quantity} cc</td>
+                            <td className="px-5 py-3 text-center"><span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${unit.safetyStatus === 'Cleared' ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : unit.safetyStatus === 'Hold-Quarantined' ? 'border-amber-100 bg-amber-50 text-amber-700' : 'border-rose-100 bg-rose-50 text-rose-700'}`}>{unit.safetyStatus}</span></td>
+                            <td className="px-5 py-3"><span className="rounded border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">{unit.inventoryStatus}</span></td>
+                          </tr>;
+                        })}
+                        {filteredUnits.length === 0 && <tr><td colSpan={9} className="px-5 py-8 text-center text-xs text-slate-400">No available blood bags match the current filters.</td></tr>}
+                      </tbody>
+                    </table></div>
+                  </div>
+                </>;
+              })()}
             </div>
           )}
 
@@ -1464,6 +1696,7 @@ export default function AdminDashboard() {
                                         contactNumber: u.contactNumber || '',
                                         role: u.role || 'Registry Staff',
                                         roleId: u.roleId || 'ROLE-003',
+                                        hospitalId: u.hospitalId || '',
                                         status: u.status || 'Active',
                                       });
                                       setShowEditUserModal(true);
@@ -1488,8 +1721,46 @@ export default function AdminDashboard() {
           )}
 
 
-          {/* TAB: DONOR MANAGEMENT */}
-          {tab === 'donors' && (
+          {/* TAB: DONOR MANAGEMENT — Administrator oversight only */}
+          {tab === 'donors' && (() => {
+            const donorEligibility = donor => {
+              const remarks = String(donor.remarks || '').toLowerCase();
+              if (remarks.includes('defer') || remarks.includes('hemoglobin') || remarks.includes('tattoo')) return 'Deferred';
+              if (!donor.lastDonation) return 'Eligible';
+              const days = Math.floor((Date.now() - new Date(donor.lastDonation)) / 86400000);
+              return days >= 90 ? 'Eligible' : 'Waiting period';
+            };
+            const filteredDonors = donors.filter(donor => {
+              const query = searchQuery.trim().toLowerCase();
+              const matchesSearch = !query || [donor.name, donor.bloodType, donor.phone, donor.address, donor.status].some(value => String(value ?? '').toLowerCase().includes(query));
+              return matchesSearch && (adminDonorBloodType === 'All' || donor.bloodType === adminDonorBloodType) && (adminDonorEligibility === 'All' || donorEligibility(donor) === adminDonorEligibility);
+            });
+            const eligibleCount = donors.filter(donor => donorEligibility(donor) === 'Eligible').length;
+            const deferredCount = donors.filter(donor => donorEligibility(donor) === 'Deferred').length;
+            const dueForRecall = donors.filter(donor => donor.lastDonation && Math.floor((Date.now() - new Date(donor.lastDonation)) / 86400000) >= 90).length;
+            const eligibilityClass = eligibility => eligibility === 'Eligible' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : eligibility === 'Deferred' ? 'bg-rose-50 border-rose-100 text-rose-700' : 'bg-amber-50 border-amber-100 text-amber-700';
+            return <div className="space-y-6 fade-in">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  ['Registered donors', donors.length, 'Donor records in the registry', Users, 'text-indigo-600'],
+                  ['Eligible donors', eligibleCount, 'May be considered for recall', UserCheck, 'text-emerald-600'],
+                  ['Deferred donors', deferredCount, 'Temporary or medical deferral', ShieldAlert, 'text-rose-600'],
+                  ['Due for recall', dueForRecall, 'At least 90 days since donation', MessageSquare, 'text-amber-600'],
+                ].map(([label, value, detail, Icon, color]) => <div key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p><p className="mt-2 text-2xl font-black text-slate-900">{value}</p><p className="mt-1 text-xs text-slate-500">{detail}</p></div><Icon className={`h-5 w-5 ${color}`} /></div></div>)}
+              </div>
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-6 py-4">
+                  <div><h3 className="text-sm font-bold text-slate-900">Donor Directory</h3><p className="mt-0.5 text-xs text-slate-500">Read-only donor profile, donation, and eligibility monitoring.</p></div>
+                  <div className="flex flex-wrap gap-2"><div className="relative"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" /><input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search name, phone, location" className="w-48 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-xs outline-none focus:border-indigo-400" /></div><select value={adminDonorBloodType} onChange={event => setAdminDonorBloodType(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600"><option>All</option>{BLOOD_TYPES.map(type => <option key={type}>{type}</option>)}</select><select value={adminDonorEligibility} onChange={event => setAdminDonorEligibility(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600">{['All', 'Eligible', 'Waiting period', 'Deferred'].map(status => <option key={status}>{status}</option>)}</select><button onClick={fetchDonorsFromAPI} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" /> Refresh</button></div>
+                </div>
+                <div className="overflow-x-auto"><table className="w-full border-collapse text-left text-xs text-slate-650"><thead><tr className="border-b border-slate-200 bg-slate-50 uppercase tracking-wider text-slate-400"><th className="px-5 py-3 font-bold">Donor</th><th className="px-5 py-3 text-center font-bold">Blood type</th><th className="px-5 py-3 font-bold">Contact</th><th className="px-5 py-3 font-bold">Location</th><th className="px-5 py-3 text-center font-bold">Last donation</th><th className="px-5 py-3 text-center font-bold">Eligibility</th><th className="px-5 py-3 text-right font-bold">Profile</th></tr></thead><tbody className="divide-y divide-slate-100">{filteredDonors.map(donor => { const eligibility = donorEligibility(donor); return <tr key={donor.id} className="hover:bg-slate-50/50"><td className="px-5 py-3"><p className="font-bold text-slate-900">{donor.name}</p><p className="text-[10px] text-slate-400">{donor.totalDonations || 0} donation{Number(donor.totalDonations || 0) === 1 ? '' : 's'} recorded</p></td><td className="px-5 py-3 text-center"><span className="rounded border border-rose-100 bg-rose-50 px-1.5 py-0.5 font-mono text-[10px] font-black text-[#C21C24]">{donor.bloodType || '—'}</span></td><td className="px-5 py-3 font-mono text-[11px] text-slate-600">{donor.phone || '—'}</td><td className="max-w-[13rem] truncate px-5 py-3 text-slate-600">{donor.address || '—'}</td><td className="px-5 py-3 text-center font-mono text-[10px]">{donor.lastDonation || 'No donation yet'}</td><td className="px-5 py-3 text-center"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${eligibilityClass(eligibility)}`}>{eligibility}</span></td><td className="px-5 py-3 text-right"><button onClick={() => setSelectedAdminDonor(donor)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50"><FileText className="h-3.5 w-3.5" /> View details</button></td></tr>; })}{filteredDonors.length === 0 && <tr><td colSpan={7} className="px-5 py-8 text-center text-slate-400">No donors match the current filters.</td></tr>}</tbody></table></div>
+              </div>
+              {selectedAdminDonor && createPortal(<div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm"><section className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"><div className="flex items-center justify-between border-b border-slate-100 px-6 py-4"><div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100"><Users className="h-4 w-4 text-indigo-600" /></div><div><h3 className="text-sm font-bold text-slate-900">{selectedAdminDonor.name}</h3><p className="text-[10px] font-semibold text-slate-400">{selectedAdminDonor.bloodType || 'Unknown blood type'} · {donorEligibility(selectedAdminDonor)}</p></div></div><button onClick={() => setSelectedAdminDonor(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X className="h-5 w-5" /></button></div><div className="grid grid-cols-4 gap-3 border-b border-slate-100 bg-slate-50 px-6 py-3 text-[10px]"><div><p className="uppercase tracking-wider text-slate-400">Contact</p><p className="mt-0.5 font-semibold text-slate-700">{selectedAdminDonor.phone || '—'}</p></div><div><p className="uppercase tracking-wider text-slate-400">Location</p><p className="mt-0.5 font-semibold text-slate-700">{selectedAdminDonor.address || '—'}</p></div><div><p className="uppercase tracking-wider text-slate-400">Last donation</p><p className="mt-0.5 font-semibold text-slate-700">{selectedAdminDonor.lastDonation || '—'}</p></div><div><p className="uppercase tracking-wider text-slate-400">Donations</p><p className="mt-0.5 font-semibold text-slate-700">{selectedAdminDonor.totalDonations || 0}</p></div></div><div className="space-y-4 overflow-y-auto p-6"><div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Eligibility status</p><span className={`mt-2 inline-flex rounded border px-2 py-1 text-xs font-bold ${eligibilityClass(donorEligibility(selectedAdminDonor))}`}>{donorEligibility(selectedAdminDonor)}</span></div><div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Registry remarks</p><p className="mt-1 rounded-xl bg-slate-50 p-3 text-sm text-slate-700">{selectedAdminDonor.remarks || 'No remarks recorded.'}</p></div><div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-[10px] font-semibold text-blue-700">This profile is view-only. Registry staff manage donor registration, medical deferrals, and record updates.</div></div></section></div>, document.body)}
+            </div>;
+          })()}
+
+          {/* Retained legacy donor markup; it is not rendered for Administrator users. */}
+          {false && tab === 'donors' && (
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden fade-in">
               <div className="p-4 border-b border-slate-100 flex items-center justify-between gap-4">
                 <div className="search">
@@ -1684,8 +1955,88 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {/* TAB: BLOOD ISSUANCE */}
-          {tab === 'issuance' && (
+          {/* TAB: BLOOD ISSUANCE — Administrator oversight only */}
+          {tab === 'issuance' && (() => {
+            const requestIsOpen = request => !['Released', 'Fulfilled', 'Rejected', 'Declined'].includes(request.status);
+            const requestIsUrgent = request => ['urgent', 'emergency'].includes(String(request.urgency).toLowerCase());
+            const statusStyle = status => {
+              if (['Released', 'Fulfilled'].includes(status)) return 'bg-emerald-50 border-emerald-100 text-emerald-700';
+              if (['Rejected', 'Declined'].includes(status)) return 'bg-rose-50 border-rose-100 text-rose-700';
+              if (['Ready for Release', 'Verified'].includes(status)) return 'bg-blue-50 border-blue-100 text-blue-700';
+              return 'bg-amber-50 border-amber-100 text-amber-700';
+            };
+            const statuses = ['All', ...new Set(bloodRequests.map(request => request.status).filter(Boolean))];
+            const filteredRequests = bloodRequests.filter(request => {
+              const query = adminIssuanceSearch.trim().toLowerCase();
+              const values = [request.refNo, request.hospital, request.status, request.urgency, ...(request.items || []).flatMap(item => [item.bloodType, item.component])];
+              return (adminIssuanceStatus === 'All' || request.status === adminIssuanceStatus) &&
+                (!query || values.some(value => String(value ?? '').toLowerCase().includes(query)));
+            });
+            const openCount = bloodRequests.filter(requestIsOpen).length;
+            const urgentCount = bloodRequests.filter(request => requestIsOpen(request) && requestIsUrgent(request)).length;
+            const readyCount = bloodRequests.filter(request => request.status === 'Ready for Release').length;
+            const releasedCount = bloodIssuances.filter(issuance => issuance.status === 'Released').length;
+
+            return <div className="space-y-6 fade-in">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  ['Open requests', openCount, 'Awaiting Issuance review', Clock, 'text-amber-600'],
+                  ['Urgent attention', urgentCount, 'Urgent or emergency requests', AlertTriangle, 'text-rose-600'],
+                  ['Ready for release', readyCount, 'Prepared by blood-bank staff', ClipboardList, 'text-blue-600'],
+                  ['Released issuances', releasedCount, 'Recorded release transactions', CheckCircle, 'text-emerald-600'],
+                ].map(([label, count, detail, Icon, color]) => <div key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p><p className="mt-2 text-2xl font-black text-slate-900">{count}</p><p className="mt-1 text-xs text-slate-500">{detail}</p></div><Icon className={`h-5 w-5 ${color}`} /></div>
+                </div>)}
+              </div>
+
+              {urgentCount > 0 && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800"><span className="font-bold">Attention:</span> {urgentCount} open urgent/emergency request{urgentCount === 1 ? '' : 's'} require Issuance-team action. This view is monitoring only.</div>}
+
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-6 py-4">
+                  <div><h3 className="text-sm font-bold text-slate-900">Hospital Request Monitoring</h3><p className="mt-0.5 text-xs text-slate-500">Administrators can view requests but cannot process, release, accept, or decline them.</p></div>
+                  <div className="flex flex-wrap gap-2"><div className="relative"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" /><input value={adminIssuanceSearch} onChange={event => setAdminIssuanceSearch(event.target.value)} placeholder="Search request or hospital" className="w-48 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-xs outline-none focus:border-indigo-400" /></div><select value={adminIssuanceStatus} onChange={event => setAdminIssuanceStatus(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600 outline-none">{statuses.map(status => <option key={status}>{status}</option>)}</select><button onClick={() => { fetchBloodRequestsFromAPI(); fetchBloodIssuancesFromAPI(); }} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" /> Refresh</button></div>
+                </div>
+                <div className="overflow-x-auto"><table className="w-full border-collapse text-left text-xs text-slate-650"><thead><tr className="border-b border-slate-200 bg-slate-50 uppercase tracking-wider text-slate-400"><th className="px-5 py-3 font-bold">Reference</th><th className="px-5 py-3 font-bold">Hospital</th><th className="px-5 py-3 font-bold">Required components</th><th className="px-5 py-3 text-center font-bold">Urgency</th><th className="px-5 py-3 text-center font-bold">Needed</th><th className="px-5 py-3 text-center font-bold">Status</th><th className="px-5 py-3 text-right font-bold">Record</th></tr></thead><tbody className="divide-y divide-slate-100">
+                  {filteredRequests.map(request => <tr key={request.refNo} className="hover:bg-slate-50/50"><td className="px-5 py-3 font-mono font-bold text-indigo-700">{request.refNo}</td><td className="px-5 py-3"><p className="font-bold text-slate-900">{request.hospital}</p><p className="text-[10px] text-slate-400">{request.submittedAt || '—'}</p></td><td className="px-5 py-3">{(request.items || []).map(item => <span key={`${item.bloodType}-${item.component}`} className="mb-1 mr-1 inline-flex rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-bold">{item.bloodType} · {item.component} · {item.units}</span>)}</td><td className="px-5 py-3 text-center"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${String(request.urgency).toLowerCase() === 'emergency' ? 'border-rose-100 bg-rose-50 text-rose-700' : String(request.urgency).toLowerCase() === 'urgent' ? 'border-amber-100 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>{request.urgency}</span></td><td className="px-5 py-3 text-center font-mono text-[10px]">{request.dateNeeded || '—'}</td><td className="px-5 py-3 text-center"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${statusStyle(request.status)}`}>{request.status}</span></td><td className="px-5 py-3 text-right"><button onClick={() => setSelectedAdminRequest(request)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50"><FileText className="h-3.5 w-3.5" /> View details</button></td></tr>)}
+                  {filteredRequests.length === 0 && <tr><td colSpan={7} className="px-5 py-8 text-center text-slate-400">No requests match the current filters.</td></tr>}
+                </tbody></table></div>
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-6 py-4"><h3 className="text-sm font-bold text-slate-900">Issuance Release History</h3><p className="mt-0.5 text-xs text-slate-500">Prepared and released component records.</p></div><div className="overflow-x-auto"><table className="w-full border-collapse text-left text-xs text-slate-650"><thead><tr className="border-b border-slate-200 bg-slate-50 uppercase tracking-wider text-slate-400"><th className="px-5 py-3 font-bold">Issuance</th><th className="px-5 py-3 font-bold">Request</th><th className="px-5 py-3 font-bold">Hospital</th><th className="px-5 py-3 font-bold">Components</th><th className="px-5 py-3 font-bold">Processed by</th><th className="px-5 py-3 text-center font-bold">Status</th><th className="px-5 py-3 font-bold">Release date</th></tr></thead><tbody className="divide-y divide-slate-100">{bloodIssuances.slice(0, 10).map(issuance => <tr key={issuance.issuanceId} className="hover:bg-slate-50/50"><td className="px-5 py-3 font-mono font-bold text-indigo-700">{issuance.issuanceRef}</td><td className="px-5 py-3 font-mono text-slate-500">{issuance.requestRef}</td><td className="px-5 py-3 font-bold text-slate-800">{issuance.hospital}</td><td className="px-5 py-3">{(issuance.items || []).map(item => <span key={`${item.bloodType}-${item.component}`} className="mb-1 mr-1 inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold">{item.bloodType} · {item.component} · {item.quantityIssued}</span>)}</td><td className="px-5 py-3">{issuance.processedBy}</td><td className="px-5 py-3 text-center"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${statusStyle(issuance.status)}`}>{issuance.status}</span></td><td className="px-5 py-3 text-[11px] text-slate-500">{issuance.releaseDate || issuance.issuanceDate || '—'}</td></tr>)}{bloodIssuances.length === 0 && <tr><td colSpan={7} className="px-5 py-8 text-center text-slate-400">No issuance records have been created yet.</td></tr>}</tbody></table></div></div>
+
+              {selectedAdminRequest && createPortal(
+                <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+                <section className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100"><ClipboardList className="h-4 w-4 text-indigo-600" /></div>
+                      <div><p className="font-mono text-[10px] font-bold text-slate-400">{selectedAdminRequest.refNo}</p>
+                      <h3 className="text-sm font-bold text-slate-900">Request details</h3>
+                      <p className="text-[10px] text-slate-400">Read-only administrative view</p></div>
+                    </div>
+                    <button onClick={() => setSelectedAdminRequest(null)} className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700" title="Close details"><X className="h-5 w-5" /></button>
+                  </div>
+                  <div className="grid flex-1 grid-cols-1 gap-5 overflow-y-auto p-6 lg:grid-cols-2">
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-xl border border-slate-100 bg-slate-50 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Hospital</p><p className="mt-1 font-bold leading-snug text-slate-900">{selectedAdminRequest.hospital}</p></div>
+                      <div className="rounded-xl border border-slate-100 bg-slate-50 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Status</p><span className={`mt-1 inline-flex rounded border px-2 py-0.5 text-[10px] font-bold ${statusStyle(selectedAdminRequest.status)}`}>{selectedAdminRequest.status}</span></div>
+                      <div className="rounded-xl border border-slate-100 bg-slate-50 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Urgency</p><p className="mt-1 font-semibold capitalize text-slate-700">{selectedAdminRequest.urgency || '—'}</p></div>
+                      <div className="rounded-xl border border-slate-100 bg-slate-50 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Date needed</p><p className="mt-1 font-mono text-xs font-semibold text-slate-700">{selectedAdminRequest.dateNeeded || '—'}</p></div>
+                    </div>
+                    <div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Requested components</p><div className="mt-2 space-y-2">{(selectedAdminRequest.items || []).map(item => <div key={`${item.bloodType}-${item.component}`} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs shadow-sm"><span className="font-bold text-slate-800">{item.bloodType} · {item.component}</span><span className="rounded bg-indigo-50 px-2 py-1 font-mono font-bold text-indigo-700">{item.units} unit{item.units === 1 ? '' : 's'}</span></div>)}</div></div>
+                    <div className="border-t border-slate-100 pt-4"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Requested by</p><p className="mt-1 text-sm text-slate-700">{selectedAdminRequest.requestingPersonnel || selectedAdminRequest.filedBy || '—'}</p></div>
+                    {selectedAdminRequest.ward && <div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Ward / diagnosis</p><p className="mt-1 text-sm leading-relaxed text-slate-700">{selectedAdminRequest.ward}{selectedAdminRequest.diagnosis ? ` · ${selectedAdminRequest.diagnosis}` : ''}</p></div>}
+                    {selectedAdminRequest.remarks && <div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Processing remarks</p><p className="mt-1 rounded-xl bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">{selectedAdminRequest.remarks}</p></div>}
+                  </div>
+                  <div className="border-t border-slate-100 bg-blue-50 px-6 py-3 text-right"><button onClick={() => setSelectedAdminRequest(null)} className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100">Close</button></div>
+                </section>
+                </div>
+              , document.body)}
+            </div>;
+          })()}
+
+          {/* Retained legacy markup; it is not rendered for Administrator users. */}
+          {false && tab === 'issuance' && (
             <div className="space-y-4 fade-in">
               {/* Emergency Retracking Banner */}
               {emergencyBloodType && (() => {
@@ -3266,7 +3617,7 @@ export default function AdminDashboard() {
               </div>
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Phone</label>
-                <input type="text" value={hospitalForm.phone} onChange={e => setHospitalForm(f => ({ ...f, phone: e.target.value }))} placeholder="0917-000-0000" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:border-slate-800 focus:ring-1 focus:ring-slate-800 outline-none transition bg-slate-50/50" />
+                <input type="tel" inputMode="numeric" maxLength={13} value={hospitalForm.phone} onChange={e => setHospitalForm(f => ({ ...f, phone: sanitizePhone(e.target.value) }))} placeholder="09171234567" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:border-slate-800 focus:ring-1 focus:ring-slate-800 outline-none transition bg-slate-50/50" />
               </div>
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Email</label>
@@ -3288,8 +3639,10 @@ export default function AdminDashboard() {
             <div className="flex justify-end gap-2.5 text-xs font-semibold mt-5">
               <button onClick={() => setShowHospitalModal(false)} className="px-4 py-2 bg-slate-50 border border-slate-200 text-slate-650 rounded hover:bg-slate-100 transition-all">Cancel</button>
               <button
-                onClick={() => {
-                  if (!hospitalForm.name.trim()) return setNoticeModal({ isOpen: true, title: 'Required Field Missing', message: 'Hospital name is required.', variant: 'warning' });
+                onClick={async () => {
+                  if (!hospitalForm.name.trim() || !hospitalForm.contact.trim() || !hospitalForm.address.trim()) return setNoticeModal({ isOpen: true, title: 'Required Field Missing', message: 'Hospital name, contact person, and address are required.', variant: 'warning' });
+                  if (!isPhilippineMobile(hospitalForm.phone)) return setNoticeModal({ isOpen: true, title: 'Invalid Phone Number', message: 'Enter a valid Philippine mobile number (example: 09171234567).', variant: 'warning' });
+                  if (!isValidEmail(hospitalForm.email)) return setNoticeModal({ isOpen: true, title: 'Invalid Email', message: 'Enter a valid email address or leave it blank.', variant: 'warning' });
 
                   if (!editingHospital) {
                     const isDup = hospitals.some(h => h.name.toLowerCase() === hospitalForm.name.trim().toLowerCase());
@@ -3304,9 +3657,17 @@ export default function AdminDashboard() {
                   }
 
                   if (editingHospital) {
-                    updateHospital(editingHospital.id, hospitalForm);
+                    try {
+                      await updateHospital(editingHospital.id, hospitalForm);
+                    } catch (error) {
+                      return setNoticeModal({ isOpen: true, title: 'Hospital Was Not Updated', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
+                    }
                   } else {
-                    addHospital(hospitalForm);
+                    try {
+                      await addHospital(hospitalForm);
+                    } catch (error) {
+                      return setNoticeModal({ isOpen: true, title: 'Hospital Was Not Saved', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
+                    }
                   }
                   setShowHospitalModal(false);
                 }}
@@ -3345,7 +3706,7 @@ export default function AdminDashboard() {
                   className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 text-slate-650 rounded-lg hover:bg-slate-100 transition"
                 >Cancel</button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     recordDistribution(allocateTarget.hospitalId, allocateTarget.hospitalName, allocateTarget.bloodType, allocateTarget.units);
                     setShowAllocateModal(false);
                     setAllocateTarget(null);
@@ -3426,15 +3787,15 @@ export default function AdminDashboard() {
 
               {/* password_hash */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">Password</label>
-                <input type="password" value={addUserForm.passwordHash} onChange={e => setAddUserForm(f => ({ ...f, passwordHash: e.target.value }))} placeholder="Enter initial password" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:border-slate-800 focus:ring-1 focus:ring-slate-800 outline-none bg-slate-50/50" />
-                <p className="text-[9px] text-slate-400 mt-0.5">Stored as password_hash (VARCHAR 255)</p>
+                <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">Password <span className="text-rose-500">*</span></label>
+                <input type="password" minLength={6} value={addUserForm.passwordHash} onChange={e => setAddUserForm(f => ({ ...f, passwordHash: e.target.value }))} placeholder="At least 6 characters" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:border-slate-800 focus:ring-1 focus:ring-slate-800 outline-none bg-slate-50/50" />
+                <p className="text-[9px] text-slate-400 mt-0.5">Required. It must contain at least 6 characters.</p>
               </div>
 
               {/* contact_number */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">Contact Number</label>
-                <input type="text" value={addUserForm.contactNumber} onChange={e => setAddUserForm(f => ({ ...f, contactNumber: e.target.value }))} placeholder="e.g. +63 917 123 4567" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:border-slate-800 focus:ring-1 focus:ring-slate-800 outline-none bg-slate-50/50" />
+                <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">Contact Number <span className="text-rose-500">*</span></label>
+                <input type="tel" inputMode="numeric" maxLength={13} value={addUserForm.contactNumber} onChange={e => setAddUserForm(f => ({ ...f, contactNumber: sanitizePhone(e.target.value) }))} placeholder="e.g. 09171234567" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:border-slate-800 focus:ring-1 focus:ring-slate-800 outline-none bg-slate-50/50" />
               </div>
 
 
@@ -3446,23 +3807,7 @@ export default function AdminDashboard() {
                     <label className="block text-[10px] font-bold text-purple-700 uppercase tracking-wider mb-1">Affiliated Hospital / Facility (FK)</label>
                     <select
                       value={addUserForm.hospitalId}
-                      onChange={e => {
-                        const targetId = e.target.value;
-                        const match = hospitals.find(h => h.id === targetId);
-                        if (match) {
-                          const nameParts = (match.contact || 'Hospital Admin').split(' ');
-                          setAddUserForm(f => ({
-                            ...f,
-                            hospitalId: targetId,
-                            firstName: nameParts[0] || 'Hospital',
-                            lastName: nameParts.slice(1).join(' ') || 'Admin',
-                            email: match.email || '',
-                            contactNumber: match.phone || ''
-                          }));
-                        } else {
-                          setAddUserForm(f => ({ ...f, hospitalId: '' }));
-                        }
-                      }}
+                      onChange={e => setAddUserForm(f => ({ ...f, hospitalId: e.target.value }))}
                       className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs bg-white outline-none focus:border-slate-800"
                     >
                       <option value="">Select hospital...</option>
@@ -3471,7 +3816,7 @@ export default function AdminDashboard() {
                       ))}
                     </select>
                   </div>
-                  <p className="text-[9.5px] text-purple-600 font-medium italic">💡 Selecting an affiliated hospital will automatically fetch the registered Contact Person, Email, and Phone details, and will mark the hospital registration as <b>Active (Approved)</b> upon registration.</p>
+                  <p className="text-[9.5px] text-purple-600 font-medium italic">Select the facility this account belongs to. Enter the account holder’s own name, email, phone number, and password above.</p>
                 </div>
               )}
 
@@ -3497,8 +3842,12 @@ export default function AdminDashboard() {
                   className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 text-slate-655 rounded-lg hover:bg-slate-100 transition cursor-pointer"
                 >Cancel</button>
                 <button
-                  onClick={() => {
-                    if (!addUserForm.firstName.trim() || !addUserForm.lastName.trim() || !addUserForm.email.trim()) return setNoticeModal({ isOpen: true, title: 'Required Fields Missing', message: 'First name, last name, and email are required.', variant: 'warning' });
+                  onClick={async () => {
+                    if (!addUserForm.firstName.trim() || !addUserForm.lastName.trim() || !addUserForm.email.trim() || !addUserForm.passwordHash || !addUserForm.contactNumber.trim()) return setNoticeModal({ isOpen: true, title: 'Required Fields Missing', message: 'First name, last name, email, password, and contact number are all required.', variant: 'warning' });
+                    if (!isValidEmail(addUserForm.email)) return setNoticeModal({ isOpen: true, title: 'Invalid Email', message: 'Enter a valid email address.', variant: 'warning' });
+                    if (addUserForm.passwordHash.length < 6) return setNoticeModal({ isOpen: true, title: 'Invalid Password', message: 'The initial password must contain at least 6 characters.', variant: 'warning' });
+                    if (!isPhilippineMobile(addUserForm.contactNumber)) return setNoticeModal({ isOpen: true, title: 'Invalid Phone Number', message: 'Enter a valid Philippine mobile number.', variant: 'warning' });
+                    if (addUserForm.role === 'Hospital User' && !addUserForm.hospitalId) return setNoticeModal({ isOpen: true, title: 'Hospital Required', message: 'Select the affiliated hospital for a Hospital User account.', variant: 'warning' });
 
                     const isDupEmail = users.some(u => u.email.toLowerCase() === addUserForm.email.trim().toLowerCase());
                     if (isDupEmail) {
@@ -3510,7 +3859,11 @@ export default function AdminDashboard() {
                       });
                     }
 
-                    addUser(addUserForm);
+                    try {
+                      await addUser(addUserForm);
+                    } catch (error) {
+                      return setNoticeModal({ isOpen: true, title: 'User Was Not Saved', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
+                    }
                     setUserSaved(true);
                     setAddUserForm({ firstName: '', lastName: '', email: '', passwordHash: '', contactNumber: '', role: 'Registry Staff', roleId: 'ROLE-003', status: 'Active', hospitalId: '' });
                     setTimeout(() => {
@@ -3564,9 +3917,19 @@ export default function AdminDashboard() {
 
               {/* Contact */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">Contact Number</label>
-                <input type="text" value={editUserForm.contactNumber} onChange={e => setEditUserForm(f => ({ ...f, contactNumber: e.target.value }))} placeholder="e.g. +63 917 123 4567" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:border-slate-800 focus:ring-1 focus:ring-slate-800 outline-none bg-slate-50/50" />
+                <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">Contact Number <span className="text-rose-500">*</span></label>
+                <input type="tel" inputMode="numeric" maxLength={13} value={editUserForm.contactNumber} onChange={e => setEditUserForm(f => ({ ...f, contactNumber: sanitizePhone(e.target.value) }))} placeholder="e.g. 09171234567" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:border-slate-800 focus:ring-1 focus:ring-slate-800 outline-none bg-slate-50/50" />
               </div>
+
+              {editUserForm.role === 'Hospital User' && (
+                <div>
+                  <label className="block text-[10px] font-bold text-purple-700 uppercase tracking-wider mb-1">Affiliated Hospital / Facility <span className="text-rose-500">*</span></label>
+                  <select value={editUserForm.hospitalId} onChange={e => setEditUserForm(f => ({ ...f, hospitalId: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs bg-white outline-none focus:border-slate-800">
+                    <option value="">Select hospital...</option>
+                    {hospitals.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+                  </select>
+                </div>
+              )}
 
               {/* Role */}
               <div className="grid grid-cols-2 gap-3">
@@ -3621,9 +3984,16 @@ export default function AdminDashboard() {
                   className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-100 transition cursor-pointer"
                 >Cancel</button>
                 <button
-                  onClick={() => {
-                    if (!editUserForm.firstName.trim() || !editUserForm.lastName.trim() || !editUserForm.email.trim()) return setNoticeModal({ isOpen: true, title: 'Required Fields Missing', message: 'First name, last name, and email are required.', variant: 'warning' });
-                    updateUser(editingUser.id, editUserForm);
+                  onClick={async () => {
+                    if (!editUserForm.firstName.trim() || !editUserForm.lastName.trim() || !editUserForm.email.trim() || !editUserForm.contactNumber.trim()) return setNoticeModal({ isOpen: true, title: 'Required Fields Missing', message: 'First name, last name, email, and contact number are all required.', variant: 'warning' });
+                    if (!isValidEmail(editUserForm.email)) return setNoticeModal({ isOpen: true, title: 'Invalid Email', message: 'Enter a valid email address.', variant: 'warning' });
+                    if (!isPhilippineMobile(editUserForm.contactNumber)) return setNoticeModal({ isOpen: true, title: 'Invalid Phone Number', message: 'Enter a valid Philippine mobile number.', variant: 'warning' });
+                    if (editUserForm.role === 'Hospital User' && !editUserForm.hospitalId) return setNoticeModal({ isOpen: true, title: 'Hospital Required', message: 'Select the affiliated hospital for a Hospital User account.', variant: 'warning' });
+                    try {
+                      await updateUser(editingUser.id, editUserForm);
+                    } catch (error) {
+                      return setNoticeModal({ isOpen: true, title: 'User Was Not Updated', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
+                    }
                     setEditUserSaved(true);
                     setTimeout(() => {
                       setEditUserSaved(false);
@@ -3789,14 +4159,18 @@ export default function AdminDashboard() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    if (!eventForm.province.trim() || !eventForm.cityMunicipality.trim() || !eventForm.eventDate.trim()) {
-                      return setNoticeModal({ isOpen: true, title: 'Required Fields Missing', message: 'Province, City/Municipality, and Event Date are required.', variant: 'warning' });
+                  onClick={async () => {
+                    if (!eventForm.province.trim() || !eventForm.cityMunicipality.trim() || !eventForm.barangayOrganization.trim() || !eventForm.eventDate.trim()) {
+                      return setNoticeModal({ isOpen: true, title: 'Required Fields Missing', message: 'Province, City/Municipality, Barangay/Organization, and Event Date are required.', variant: 'warning' });
                     }
-                    if (editingEvent) {
-                      updateDonationEvent(editingEvent.eventId || editingEvent.event_id, eventForm);
-                    } else {
-                      addDonationEvent(eventForm);
+                    try {
+                      if (editingEvent) {
+                        await updateDonationEvent(editingEvent.eventId || editingEvent.event_id, eventForm);
+                      } else {
+                        await addDonationEvent(eventForm);
+                      }
+                    } catch (error) {
+                      return setNoticeModal({ isOpen: true, title: 'Event Was Not Saved', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
                     }
                     setEventSaved(true);
                     setEventForm({
@@ -3922,7 +4296,9 @@ export default function AdminDashboard() {
                   <input
                     type="text"
                     value={createIssuanceForm.contactNumber}
-                    onChange={e => setCreateIssuanceForm(f => ({ ...f, contactNumber: e.target.value }))}
+                    inputMode="numeric"
+                    maxLength={13}
+                    onChange={e => setCreateIssuanceForm(f => ({ ...f, contactNumber: sanitizePhone(e.target.value) }))}
                     placeholder="e.g. 0917-XXX-XXXX"
                     className="w-full border border-slate-200 rounded-lg p-2 focus:ring-2 focus:ring-slate-900 outline-none bg-white font-medium"
                   />
@@ -3938,10 +4314,16 @@ export default function AdminDashboard() {
                 Cancel
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   const f = createIssuanceForm;
-                  if (!f.hospitalId || !f.contactPerson.trim() || !f.contactNumber.trim()) {
-                    return setNoticeModal({ isOpen: true, title: 'Required Fields Missing', message: 'Please fill in all required fields marked with *.', variant: 'warning' });
+                  if (!f.hospitalId || !f.contactPerson.trim() || !f.contactNumber.trim() || !f.diagnosis.trim() || !f.ward.trim()) {
+                    return setNoticeModal({ isOpen: true, title: 'Required Fields Missing', message: 'Hospital, contact person, contact number, diagnosis, and ward are required.', variant: 'warning' });
+                  }
+                  if (!isPhilippineMobile(f.contactNumber)) {
+                    return setNoticeModal({ isOpen: true, title: 'Invalid Phone Number', message: 'Enter a valid Philippine mobile number.', variant: 'warning' });
+                  }
+                  if (!Number.isInteger(Number(f.units)) || Number(f.units) < 1) {
+                    return setNoticeModal({ isOpen: true, title: 'Invalid Units', message: 'Enter a whole number of units greater than zero.', variant: 'warning' });
                   }
 
                   const targetHosp = hospitals.find(h => h.id === f.hospitalId);
@@ -3953,20 +4335,25 @@ export default function AdminDashboard() {
                   }
 
                   // 1. Add request
-                  const refNo = addBloodRequest({
-                    hospital: targetHosp?.name || 'Unknown Hospital',
-                    hospitalId: f.hospitalId,
-                    urgency: f.urgency,
-                    dateNeeded: new Date().toLocaleDateString(),
-                    contactPerson: f.contactPerson,
-                    contactNumber: f.contactNumber,
-                    diagnosis: f.diagnosis,
-                    ward: f.ward,
-                    patientBloodType: f.bloodType,
-                    units: f.units,
-                    items: [{ bloodType: f.bloodType, component: f.component, units: f.units }],
-                    filedByIssuance: true
-                  });
+                  let refNo;
+                  try {
+                    refNo = await addBloodRequest({
+                      hospital: targetHosp?.name || 'Unknown Hospital',
+                      hospitalId: f.hospitalId,
+                      urgency: f.urgency,
+                      dateNeeded: new Date().toISOString().slice(0, 10),
+                      contactPerson: f.contactPerson,
+                      contactNumber: f.contactNumber,
+                      diagnosis: f.diagnosis,
+                      ward: f.ward,
+                      patientBloodType: f.bloodType,
+                      units: f.units,
+                      items: [{ bloodType: f.bloodType, component: f.component, units: f.units }],
+                      filedByIssuance: true
+                    });
+                  } catch (error) {
+                    return setNoticeModal({ isOpen: true, title: 'Request Was Not Filed', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
+                  }
 
                   // 2. Approve/dispatch request directly (decrements inventory & creates details logs)
                   approveRequest(refNo);

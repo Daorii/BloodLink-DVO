@@ -30,6 +30,7 @@ import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
 import ConfirmationModal from '../components/ConfirmationModal';
 import SuccessModal from '../components/SuccessModal';
+import { firstValidationError, isAtLeastAge, isPhilippineMobile, isPastOrToday, isValidEmail, sanitizePhone } from '../utils/validation';
 
 const BLOOD_TYPES = ['All', 'O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
 const ITEMS_PER_PAGE = 5;
@@ -38,7 +39,7 @@ const ITEMS_PER_PAGE = 5;
 const DEFAULT_HEALTH = [true, true, true, true, true];
 
 export default function RegistryDashboard() {
-  const { donors, inventory, bloodInventory, addDonor, updateDonorMedical, donationEvents, authSystemUser, labTestResults, donations, recalls, addLabTestResult, recordDonation, isSidebarCollapsed, toggleSidebar, fetchDonorsFromAPI, fetchDonationEventsFromAPI, fetchDonationsFromAPI, fetchLabResultsFromAPI, fetchRecallsFromAPI, fetchBloodInventoryFromAPI, dispatchRecallSMS, dispatchBulkRecallSMS } = useBloodStore();
+  const { donors, inventory, bloodInventory, addDonor, updateDonor, updateDonorMedical, donationEvents, authSystemUser, labTestResults, donations, recalls, addLabTestResult, recordDonation, isSidebarCollapsed, toggleSidebar, fetchDonorsFromAPI, fetchDonationEventsFromAPI, fetchDonationsFromAPI, fetchLabResultsFromAPI, fetchRecallsFromAPI, fetchBloodInventoryFromAPI, dispatchRecallSMS, dispatchBulkRecallSMS } = useBloodStore();
 
   // Dynamically prepare donor lastDonation dates relative to today's date for demo purposes
   const preparedDonors = useMemo(() => {
@@ -83,6 +84,9 @@ export default function RegistryDashboard() {
     registrationDate: new Date().toISOString().slice(0, 10),
     address: ''
   });
+  const [editingRegistryDonor, setEditingRegistryDonor] = useState(null);
+  const [editDonorForm, setEditDonorForm] = useState({ firstName: '', middleName: '', lastName: '', sex: 'Female', civilStatus: 'Single', dob: '', contactNumber: '', email: '', address: '' });
+  const [editDonorSaving, setEditDonorSaving] = useState(false);
 
   // Bulk Selection State for Recalls
   const [selectedRecallIds, setSelectedRecallIds] = useState([]);
@@ -186,8 +190,20 @@ export default function RegistryDashboard() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleAddSubmit = (e) => {
+  const handleAddSubmit = async (e) => {
     e.preventDefault();
+    const validationError = firstValidationError([
+      ['Enter a valid first and last name.', newDonorForm.firstName.trim().length >= 2 && newDonorForm.lastName.trim().length >= 2],
+      ['The donor must be at least 18 years old.', isAtLeastAge(newDonorForm.dob)],
+      ['Enter a valid Philippine mobile number.', isPhilippineMobile(newDonorForm.phone)],
+      ['Enter a valid email address or leave it blank.', isValidEmail(newDonorForm.email)],
+      ['Enter a complete address.', newDonorForm.address.trim().length >= 5],
+      ['Registration date cannot be in the future.', isPastOrToday(newDonorForm.registrationDate)],
+    ]);
+    if (validationError) {
+      setNoticeModal({ isOpen: true, title: 'Check Donor Details', message: validationError, variant: 'warning' });
+      return;
+    }
     const fullName = `${newDonorForm.firstName} ${newDonorForm.middleName ? newDonorForm.middleName + ' ' : ''}${newDonorForm.lastName}`.trim();
     
     // Duplicate check: same full name AND same date of birth = true duplicate.
@@ -233,7 +249,12 @@ export default function RegistryDashboard() {
       totalDonations: 0,
       health: [true, true, true, true, true] // Default health pass for manually added registry donors
     };
-    addDonor(newDonor);
+    try {
+      await addDonor(newDonor);
+    } catch (error) {
+      setNoticeModal({ isOpen: true, title: 'Donor Was Not Registered', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
+      return;
+    }
     setShowDrawer(false);
     setNewDonorForm({
       firstName: '',
@@ -251,6 +272,47 @@ export default function RegistryDashboard() {
     setRegistryPage(1);
     // Show success confirmation modal
     setRegistrationSuccess({ isOpen: true, donorId: id, donorName: fullName });
+  };
+
+  const openDonorEdit = (donor) => {
+    const nameParts = String(donor.name || '').trim().split(/\s+/);
+    setEditingRegistryDonor(donor);
+    setEditDonorForm({
+      firstName: donor.firstName || nameParts[0] || '',
+      middleName: donor.middleName || '',
+      lastName: donor.lastName || (nameParts.length > 1 ? nameParts[nameParts.length - 1].replace(/\.$/, '') : ''),
+      sex: donor.sex || 'Female',
+      civilStatus: donor.civilStatus || 'Single',
+      dob: donor.dob || donor.birthDate || '',
+      contactNumber: donor.contactNumber || donor.phone || '',
+      email: donor.email || '',
+      address: donor.address || '',
+    });
+  };
+
+  const saveDonorEdit = async (event) => {
+    event.preventDefault();
+    if (!editingRegistryDonor) return;
+    const validationError = firstValidationError([
+      ['Enter a valid first and last name.', editDonorForm.firstName.trim().length >= 2 && editDonorForm.lastName.trim().length >= 2],
+      ['The donor must be at least 18 years old.', isAtLeastAge(editDonorForm.dob)],
+      ['Enter a valid Philippine mobile number.', isPhilippineMobile(editDonorForm.contactNumber)],
+      ['Enter a valid email address or leave it blank.', isValidEmail(editDonorForm.email)],
+      ['Enter a complete address.', editDonorForm.address.trim().length >= 5],
+    ]);
+    if (validationError) {
+      setNoticeModal({ isOpen: true, title: 'Check Donor Details', message: validationError, variant: 'warning' });
+      return;
+    }
+    setEditDonorSaving(true);
+    const result = await updateDonor(editingRegistryDonor.id, editDonorForm);
+    setEditDonorSaving(false);
+    if (result.success) {
+      setEditingRegistryDonor(null);
+      await fetchDonorsFromAPI();
+    } else {
+      setNoticeModal({ isOpen: true, title: 'Could Not Save Donor', message: result.error || 'Please try again.', variant: 'danger' });
+    }
   };
 
   // Donor Registry Data
@@ -646,6 +708,13 @@ export default function RegistryDashboard() {
                                 className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors cursor-pointer border border-indigo-100"
                               >
                                 <Eye className="w-3.5 h-3.5" /> View
+                              </button>
+                              <button
+                                onClick={() => openDonorEdit(donor)}
+                                title="Edit donor profile"
+                                className="bg-slate-50 hover:bg-slate-100 text-slate-700 text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors cursor-pointer border border-slate-200"
+                              >
+                                <Edit className="w-3.5 h-3.5" /> Edit
                               </button>
 
                             </div>
@@ -1200,6 +1269,28 @@ export default function RegistryDashboard() {
         onCancel={() => setRecallConfirm({ isOpen: false, donorId: '', donorName: '', isBulk: false })}
       />
 
+      {editingRegistryDonor && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <form onSubmit={saveDonorEdit} className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+              <div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100"><Edit className="h-4 w-4 text-indigo-600" /></div><div><h3 className="text-sm font-bold text-slate-900">Edit Donor Profile</h3><p className="text-[10px] text-slate-400">Update registry contact and demographic information.</p></div></div>
+              <button type="button" onClick={() => setEditingRegistryDonor(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="grid flex-1 grid-cols-1 gap-4 overflow-y-auto p-6 sm:grid-cols-2">
+              {[
+                ['First name', 'firstName', 'text'], ['Middle name', 'middleName', 'text'], ['Last name', 'lastName', 'text'],
+                ['Date of birth', 'dob', 'date'], ['Contact number', 'contactNumber', 'tel'], ['Email address', 'email', 'email'],
+              ].map(([label, field, type]) => <label key={field} className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}{['firstName', 'lastName', 'dob', 'contactNumber'].includes(field) && <span className="text-rose-500"> *</span>}<input required={['firstName', 'lastName', 'dob', 'contactNumber'].includes(field)} type={type} inputMode={field === 'contactNumber' ? 'numeric' : undefined} maxLength={field === 'contactNumber' ? 13 : undefined} value={editDonorForm[field]} onChange={event => setEditDonorForm({ ...editDonorForm, [field]: field === 'contactNumber' ? sanitizePhone(event.target.value) : event.target.value })} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></label>)}
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Sex<select value={editDonorForm.sex} onChange={event => setEditDonorForm({ ...editDonorForm, sex: event.target.value })} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-700 outline-none focus:border-indigo-400"><option>Female</option><option>Male</option></select></label>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Civil status<select value={editDonorForm.civilStatus} onChange={event => setEditDonorForm({ ...editDonorForm, civilStatus: event.target.value })} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-700 outline-none focus:border-indigo-400"><option>Single</option><option>Married</option><option>Widowed</option><option>Separated</option></select></label>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 sm:col-span-2">Address<textarea required value={editDonorForm.address} onChange={event => setEditDonorForm({ ...editDonorForm, address: event.target.value })} rows={2} className="mt-1.5 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></label>
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-[10px] leading-relaxed text-blue-700 sm:col-span-2"><strong>Protected fields:</strong> Blood type, eligibility, medical deferral, and donation history are updated only through their appropriate clinical workflows.</div>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4"><button type="button" onClick={() => setEditingRegistryDonor(null)} className="rounded-lg px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100">Cancel</button><button disabled={editDonorSaving} type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">{editDonorSaving ? 'Saving…' : 'Save changes'}</button></div>
+          </form>
+        </div>
+      )}
+
       <SuccessModal
         isOpen={recallSuccess.isOpen}
         title="Dispatched Successfully"
@@ -1718,7 +1809,8 @@ export default function RegistryDashboard() {
                       required type="tel"
                       className="w-full border border-slate-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-slate-900 outline-none"
                       value={newDonorForm.phone}
-                      onChange={e => setNewDonorForm({ ...newDonorForm, phone: e.target.value })}
+                      inputMode="numeric" maxLength={13}
+                      onChange={e => setNewDonorForm({ ...newDonorForm, phone: sanitizePhone(e.target.value) })}
                       placeholder="+63 9xx xxx xxxx"
                     />
                   </div>

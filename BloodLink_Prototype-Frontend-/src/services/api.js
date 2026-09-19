@@ -258,6 +258,20 @@ export async function apiGetDonationBySerial(serialNumber) {
   return request(`/donations/by-serial/${encodeURIComponent(serialNumber)}`);
 }
 
+// ─── Donor Recall endpoints ────────────────────────────────────────────────
+
+export async function apiGetRecalls() {
+  return request('/recalls');
+}
+
+export async function apiCreateRecall(data) {
+  return request('/recalls', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiCreateBulkRecalls(data) {
+  return request('/recalls/bulk', { method: 'POST', body: JSON.stringify(data) });
+}
+
 // ─── Blood Requests endpoints ─────────────────────────────────────────────
 
 export async function apiGetBloodRequests() {

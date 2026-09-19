@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useBloodStore } from '../store/useBloodStore';
 import { Heart, ArrowLeft, ArrowRight, User, Shield, Check, CheckCircle2, Info, AlertTriangle } from 'lucide-react';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
+import { firstValidationError, isAtLeastAge, isPhilippineMobile, isPositiveNumber, isValidEmail, sanitizePhone } from '../utils/validation';
 
 export default function DonorRegister() {
   const navigate = useNavigate();
@@ -11,6 +12,7 @@ export default function DonorRegister() {
   const [step, setStep] = useState(1);
   const [submitted, setSubmitted] = useState(false);
   const [donorId, setDonorId] = useState('');
+  const [formError, setFormError] = useState('');
 
   const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
   const healthQs = [
@@ -78,7 +80,22 @@ export default function DonorRegister() {
   };
 
   const submit = () => {
-    if (!form.consent) return;
+    const error = firstValidationError([
+      ['Enter a valid first and last name.', form.firstName.trim().length >= 2 && form.lastName.trim().length >= 2],
+      ['You must be at least 18 years old to register as a blood donor.', isAtLeastAge(form.dob, 18)],
+      ['Enter a valid Philippine mobile number.', isPhilippineMobile(form.phone)],
+      ['Enter a valid email address or leave it blank.', isValidEmail(form.email)],
+      ['Enter your home address.', form.address.trim().length >= 5],
+      ['Select your sex and blood type.', Boolean(form.sex && form.bloodType)],
+      ['Weight must be at least 50 kg.', isPositiveNumber(form.weight) && Number(form.weight) >= 50],
+      ['Select whether you have donated before.', Boolean(form.donatedBefore)],
+      ['Enter your last donation date.', form.donatedBefore !== 'yes' || Boolean(form.lastDonation)],
+      ['Your last donation date cannot be in the future.', form.donatedBefore !== 'yes' || new Date(`${form.lastDonation}T00:00:00`) <= new Date()],
+      ['Please confirm every medical pre-screening affirmation.', form.health.every(Boolean)],
+      ['You must agree to the data privacy consent to register.', form.consent],
+    ]);
+    if (error) { setFormError(error); return; }
+    setFormError('');
     const generatedId = registerDonor(form);
     setDonorId(generatedId);
     setSubmitted(true);
@@ -187,7 +204,9 @@ export default function DonorRegister() {
                         placeholder="+63 9XX XXX XXXX" 
                         className="w-full border border-slate-200 rounded-lg px-3.5 py-2.5 text-sm focus:border-slate-800 focus:ring-1 focus:ring-slate-800 transition outline-none bg-slate-50/50"
                         value={form.phone} 
-                        onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                        inputMode="numeric"
+                        maxLength={13}
+                        onChange={(e) => setForm({ ...form, phone: sanitizePhone(e.target.value) })}
                       />
                     </div>
                     <div>
@@ -231,7 +250,7 @@ export default function DonorRegister() {
 
                 <div className="mt-8 flex justify-end">
                   <button 
-                    onClick={() => setStep(2)} 
+                    onClick={() => { const error = firstValidationError([['Enter a valid first and last name.', form.firstName.trim().length >= 2 && form.lastName.trim().length >= 2], ['Enter a valid date of birth and confirm you are at least 18.', isAtLeastAge(form.dob, 18)], ['Select your sex.', Boolean(form.sex)], ['Enter a valid Philippine mobile number.', isPhilippineMobile(form.phone)], ['Enter a valid email address or leave it blank.', isValidEmail(form.email)], ['Enter your home address.', form.address.trim().length >= 5]]); if (error) setFormError(error); else { setFormError(''); setStep(2); } }}
                     className="inline-flex items-center gap-1.5 bg-[#C21C24] text-white px-6 py-2.5 rounded-lg text-xs font-bold hover:bg-[#A8181F] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                     disabled={!form.firstName || !form.lastName || !form.phone || !form.address}
                   >
@@ -343,7 +362,7 @@ export default function DonorRegister() {
                     <span>Back</span>
                   </button>
                   <button 
-                    onClick={() => setStep(3)} 
+                    onClick={() => { const error = firstValidationError([['Select a blood type.', Boolean(form.bloodType)], ['Weight must be at least 50 kg.', isPositiveNumber(form.weight) && Number(form.weight) >= 50], ['Select whether you have donated before.', Boolean(form.donatedBefore)], ['Enter your last donation date.', form.donatedBefore !== 'yes' || Boolean(form.lastDonation)], ['Please confirm every medical pre-screening affirmation.', form.health.every(Boolean)]]); if (error) setFormError(error); else { setFormError(''); setStep(3); } }}
                     className="inline-flex items-center gap-1.5 bg-[#C21C24] text-white px-6 py-2.5 rounded-lg text-xs font-bold hover:bg-[#A8181F] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                     disabled={!form.bloodType || !form.weight}
                   >
@@ -425,6 +444,7 @@ export default function DonorRegister() {
                     <Heart className="w-4 h-4 fill-white" />
                     <span>Register as Voluntary Donor</span>
                   </button>
+                  {formError && <p role="alert" className="mt-3 text-xs font-semibold text-rose-600">{formError}</p>}
                 </div>
               </div>
             )}

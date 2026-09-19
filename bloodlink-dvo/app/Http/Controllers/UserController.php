@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Role;
+use App\Models\Hospital;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -52,11 +53,11 @@ class UserController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'firstName'     => 'required|string|max:50',
-            'lastName'      => 'required|string|max:50',
+            'firstName'     => ['required', 'string', 'max:50', "regex:/^[\\pL][\\pL .'-]*$/u"],
+            'lastName'      => ['required', 'string', 'max:50', "regex:/^[\\pL][\\pL .'-]*$/u"],
             'email'         => 'required|email|max:100|unique:users,email',
-            'password'      => 'nullable|string|min:6',
-            'contactNumber' => 'nullable|string|max:20',
+            'password'      => 'required|string|min:6',
+            'contactNumber' => ['required', 'string', 'regex:/^(?:\+63|63|0)9\d{9}$/'],
             'role'          => 'required|string',
             'status'        => 'nullable|string|in:Active,Inactive',
             'hospitalId'    => 'nullable|string',
@@ -80,13 +81,17 @@ class UserController extends Controller
             }
         }
 
+        if ($role->role_name === 'Hospital User' && (! $hospitalId || ! Hospital::where('hospital_id', $hospitalId)->exists())) {
+            return response()->json(['message' => 'A valid affiliated hospital is required for a Hospital User account.'], 422);
+        }
+
         $user = User::create([
             'role_id'        => $role->role_id,
             'hospital_id'    => $hospitalId,
             'first_name'     => $validated['firstName'],
             'last_name'      => $validated['lastName'],
             'email'          => $validated['email'],
-            'password'       => $validated['password'] ?? 'pass123',
+            'password'       => $validated['password'],
             'contact_number' => $validated['contactNumber'] ?? null,
             'status'         => $validated['status'] ?? 'Active',
         ]);
@@ -114,12 +119,13 @@ class UserController extends Controller
         $user = User::findOrFail($id);
 
         $validated = $request->validate([
-            'firstName'     => 'sometimes|required|string|max:50',
-            'lastName'      => 'sometimes|required|string|max:50',
+            'firstName'     => ['sometimes', 'required', 'string', 'max:50', "regex:/^[\\pL][\\pL .'-]*$/u"],
+            'lastName'      => ['sometimes', 'required', 'string', 'max:50', "regex:/^[\\pL][\\pL .'-]*$/u"],
             'email'         => 'sometimes|required|email|max:100|unique:users,email,' . $user->user_id . ',user_id',
-            'contactNumber' => 'nullable|string|max:20',
+            'contactNumber' => ['sometimes', 'required', 'string', 'regex:/^(?:\+63|63|0)9\d{9}$/'],
             'role'          => 'sometimes|required|string',
             'status'        => 'nullable|string|in:Active,Inactive',
+            'hospitalId'    => 'nullable|string',
         ]);
 
         // Build update array
@@ -141,12 +147,34 @@ class UserController extends Controller
             $updates['status'] = $validated['status'];
         }
 
-        // Resolve role_id if role name changed
+        if (array_key_exists('hospitalId', $validated)) {
+            $hospitalIdStr = $validated['hospitalId'];
+            if (empty($hospitalIdStr)) {
+                $updates['hospital_id'] = null;
+            } else {
+            $hospitalId = str_starts_with((string) $hospitalIdStr, 'HOSP-')
+                ? (int) ltrim(str_replace('HOSP-', '', $hospitalIdStr), '0')
+                : (is_numeric($hospitalIdStr) ? (int) $hospitalIdStr : null);
+            if (! $hospitalId || ! Hospital::where('hospital_id', $hospitalId)->exists()) {
+                return response()->json(['message' => 'Select a valid affiliated hospital.'], 422);
+            }
+            $updates['hospital_id'] = $hospitalId;
+            }
+        }
+
+        // Resolve role_id if role name changed.
+        $effectiveRole = $user->role;
         if (isset($validated['role'])) {
             $role = Role::where('role_name', $validated['role'])->first();
-            if ($role) {
-                $updates['role_id'] = $role->role_id;
+            if (! $role) {
+                return response()->json(['message' => 'Invalid role specified.'], 422);
             }
+            $updates['role_id'] = $role->role_id;
+            $effectiveRole = $role->role_name;
+        }
+
+        if ($effectiveRole === 'Hospital User' && empty($updates['hospital_id'] ?? $user->hospital_id)) {
+            return response()->json(['message' => 'A valid affiliated hospital is required for a Hospital User account.'], 422);
         }
 
         $user->update($updates);

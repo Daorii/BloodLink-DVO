@@ -25,13 +25,13 @@ class DonationController extends Controller
     public function store(Request $request): JsonResponse
     {
         $v = $request->validate([
-            'donorId'          => 'required|integer',
+            'donorId'          => 'required|integer|exists:donors,donor_id',
             'eventId'          => 'nullable|integer',
-            'donationDate'     => 'required|date',
-            'serialNumber'     => 'nullable|string|max:30|unique:donations,serial_number',
+            'donationDate'     => 'required|date|before_or_equal:today',
+            'serialNumber'     => ['nullable', 'string', 'max:30', 'regex:/^[A-Za-z0-9-]+$/', 'unique:donations,serial_number'],
             'screeningOutcome' => 'nullable|string|in:Accepted,Temporarily Deferred,Permanently Deferred,Indefinite Deferral',
-            'deferralReason'   => 'nullable|string',
-            'deferralEndDate'  => 'nullable|date',
+            'deferralReason'   => 'required_unless:screeningOutcome,Accepted|nullable|string|max:255',
+            'deferralEndDate'  => 'nullable|date|after_or_equal:donationDate',
         ]);
 
         $eventId = null;
@@ -51,11 +51,12 @@ class DonationController extends Controller
             'recorded_by'       => $request->user()?->user_id,
         ]);
 
-        // Update donor status if outcome is provided
+        // Keep the donor summary synchronized with the authoritative donation records.
         if (!empty($v['screeningOutcome'])) {
             $status = $v['screeningOutcome'] === 'Accepted' ? 'Regular' : 'Lapsed';
             Donor::where('donor_id', $v['donorId'])->update(['donor_status' => $status]);
         }
+        $this->syncDonorDonationStats($v['donorId']);
 
         return response()->json([
             'donation' => $this->format($donation->load(['donor', 'event'])),
@@ -101,7 +102,7 @@ class DonationController extends Controller
 
         $v = $request->validate([
             'screeningOutcome' => 'required|string|max:30|in:Accepted,Temporarily Deferred,Permanently Deferred,Indefinite Deferral',
-            'deferralReason'   => 'nullable|string',
+            'deferralReason'   => 'required_unless:screeningOutcome,Accepted|nullable|string|max:255',
             'deferralEndDate'  => 'nullable|date',
         ]);
 
@@ -113,6 +114,7 @@ class DonationController extends Controller
 
         $status = $v['screeningOutcome'] === 'Accepted' ? 'Regular' : 'Lapsed';
         Donor::where('donor_id', $donation->donor_id)->update(['donor_status' => $status]);
+        $this->syncDonorDonationStats($donation->donor_id);
 
         return response()->json([
             'donation' => $this->format($donation->fresh(['donor', 'event', 'labResult'])),
@@ -121,6 +123,18 @@ class DonationController extends Controller
     }
 
     public function formatPublic(Donation $d): array { return $this->format($d); }
+
+    /** Synchronize the donor summary after a donation outcome changes. */
+    private function syncDonorDonationStats(int $donorId): void
+    {
+        $acceptedDonations = Donation::where('donor_id', $donorId)
+            ->where('screening_outcome', 'Accepted');
+
+        Donor::where('donor_id', $donorId)->update([
+            'total_donations'    => $acceptedDonations->count(),
+            'last_donation_date' => $acceptedDonations->max('donation_date'),
+        ]);
+    }
 
     private function format(Donation $d): array
     {

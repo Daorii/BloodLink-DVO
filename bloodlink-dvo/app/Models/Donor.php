@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Donor extends Model
 {
@@ -24,6 +25,11 @@ class Donor extends Model
     public function registeredBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'registered_by', 'user_id');
+    }
+
+    public function donations(): HasMany
+    {
+        return $this->hasMany(Donation::class, 'donor_id', 'donor_id');
     }
 
     // ─── Accessors (maps DB columns → frontend field names) ──────────────

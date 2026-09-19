@@ -11,27 +11,32 @@ class DonorController extends Controller
     public function index(): JsonResponse
     {
         return response()->json([
-            'donors' => Donor::orderBy('donor_id')->get()->map(fn($d) => $this->format($d))
+            // Donation statistics come from actual accepted donation records,
+            // not the denormalized donor columns which may pre-date this fix.
+            'donors' => Donor::with(['donations' => fn($query) => $query
+                ->where('screening_outcome', 'Accepted')
+                ->select(['donation_id', 'donor_id', 'donation_date'])
+            ])->orderBy('donor_id')->get()->map(fn($d) => $this->format($d))
         ]);
     }
 
     public function store(Request $request): JsonResponse
     {
         $v = $request->validate([
-            'firstName'        => 'required|string|max:50',
+            'firstName'        => ['required', 'string', 'max:50', 'regex:/^[\pL][\pL .\'-]*$/u'],
             'middleName'       => 'nullable|string|max:50',
-            'lastName'         => 'required|string|max:50',
+            'lastName'         => ['required', 'string', 'max:50', 'regex:/^[\pL][\pL .\'-]*$/u'],
             'sex'              => 'required|string|in:Male,Female',
             'civilStatus'      => 'required|string',
-            'dob'              => 'required|date',
+            'dob'              => 'required|date|before:today',
             'address'          => 'required|string',
-            'contactNumber'    => 'required|string|max:20',
+            'contactNumber'    => ['required', 'string', 'regex:/^(?:\+63|63|0)9\d{9}$/'],
             'email'            => 'nullable|email|max:100',
             'bloodType'        => 'nullable|string|max:50',
             'status'           => 'nullable|string',
-            'donationDate'     => 'nullable|date',
-            'lastDonation'     => 'nullable|date',
-            'totalDonations'   => 'nullable|integer',
+            'donationDate'     => 'nullable|date|before_or_equal:today',
+            'lastDonation'     => 'nullable|date|before_or_equal:today',
+            'totalDonations'   => 'nullable|integer|min:0',
             'remarks'          => 'nullable|string|max:255',
         ]);
 
@@ -62,19 +67,19 @@ class DonorController extends Controller
         $donor = Donor::findOrFail($id);
 
         $v = $request->validate([
-            'firstName'      => 'sometimes|required|string|max:50',
+            'firstName'      => ['sometimes', 'required', 'string', 'max:50', 'regex:/^[\pL][\pL .\'-]*$/u'],
             'middleName'     => 'nullable|string|max:50',
-            'lastName'       => 'sometimes|required|string|max:50',
+            'lastName'       => ['sometimes', 'required', 'string', 'max:50', 'regex:/^[\pL][\pL .\'-]*$/u'],
             'sex'            => 'sometimes|string',
             'civilStatus'    => 'sometimes|string',
-            'dob'            => 'sometimes|date',
+            'dob'            => 'sometimes|date|before:today',
             'address'        => 'sometimes|string',
-            'contactNumber'  => 'sometimes|string|max:20',
+            'contactNumber'  => ['sometimes', 'required', 'string', 'regex:/^(?:\+63|63|0)9\d{9}$/'],
             'email'          => 'nullable|email|max:100',
             'bloodType'      => 'nullable|string|max:5',
             'status'         => 'nullable|string',
-            'lastDonation'   => 'nullable|date',
-            'totalDonations' => 'nullable|integer',
+            'lastDonation'   => 'nullable|date|before_or_equal:today',
+            'totalDonations' => 'nullable|integer|min:0',
             'remarks'        => 'nullable|string|max:255',
         ]);
 
@@ -105,9 +110,18 @@ class DonorController extends Controller
 
     private function format(Donor $d): array
     {
+        $acceptedDonations = $d->relationLoaded('donations') ? $d->donations : collect();
+        $lastAcceptedDonation = $acceptedDonations
+            ->sortByDesc('donation_date')
+            ->first();
+
         return [
             'id'             => $d->id,
             'name'           => $d->name,
+            // Kept separately so a Registry edit does not lose a donor's middle name.
+            'firstName'      => $d->first_name,
+            'middleName'     => $d->middle_name ?? '',
+            'lastName'       => $d->last_name,
             'sex'            => $d->sex,
             'civilStatus'    => $d->civil_status,
             'dob'            => $d->birth_date,
@@ -117,8 +131,8 @@ class DonorController extends Controller
             'email'          => $d->email ?? '',
             'status'         => $d->donor_status,
             'donationDate'   => $d->registration_date,
-            'lastDonation'   => $d->last_donation_date ?? '',
-            'totalDonations' => $d->total_donations,
+            'lastDonation'   => $lastAcceptedDonation?->donation_date ?? $d->last_donation_date ?? '',
+            'totalDonations' => $d->relationLoaded('donations') ? $acceptedDonations->count() : $d->total_donations,
             'remarks'        => $d->remarks ?? '',
         ];
     }

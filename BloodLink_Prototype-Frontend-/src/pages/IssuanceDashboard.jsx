@@ -379,7 +379,7 @@ export default function IssuanceDashboard() {
 
   const handleCartItemChange = (e) => {
     const { name, value } = e.target;
-    setCartItem(ci => ({ ...ci, [name]: value }));
+    setCartItem(ci => ({ ...ci, [name]: name === 'units' ? value.replace(/\D/g, '').slice(0, 2) : value }));
   };
 
   const handleAddToCart = () => {
@@ -407,6 +407,10 @@ export default function IssuanceDashboard() {
       setCartError('Please add at least one blood component to the requisition.');
       return;
     }
+    if (!form.dateNeeded || new Date(`${form.dateNeeded}T00:00:00`) < new Date(new Date().toDateString())) {
+      setCartError('Select a date needed that is today or later.');
+      return;
+    }
     // For issuance staff filing on behalf of a hospital, use the selected hospital
     let submittingHospitalId = hospitalId;
     let submittingHospitalName = hospitalName;
@@ -415,14 +419,20 @@ export default function IssuanceDashboard() {
       submittingHospitalId = selHosp?.id || 'HOSP-001';
       submittingHospitalName = selHosp?.name || 'Unknown Hospital';
     }
-    const refNo = await addBloodRequest({
-      ...form,
-      hospital: submittingHospitalName,
-      hospitalId: submittingHospitalId,
-      items: cartItems,
-      filedByIssuance: isIssuanceStaff,
-      filedBy: authSystemUser?.name || 'Issuance Personnel',
-    });
+    let refNo;
+    try {
+      refNo = await addBloodRequest({
+        ...form,
+        hospital: submittingHospitalName,
+        hospitalId: submittingHospitalId,
+        items: cartItems,
+        filedByIssuance: isIssuanceStaff,
+        filedBy: authSystemUser?.name || 'Issuance Personnel',
+      });
+    } catch (error) {
+      setCartError(error?.data?.message || error?.message || 'The request could not be submitted. Please correct the information and try again.');
+      return;
+    }
     setSubmitted(refNo);
     setShowForm(false);
     setForm({ ...emptyForm });
@@ -2510,7 +2520,7 @@ export default function IssuanceDashboard() {
                       </div>
                       <div>
                         <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">Units</label>
-                        <input type="number" name="units" min="1" max="50" value={cartItem.units} onChange={handleCartItemChange}
+                        <input type="number" name="units" min="1" max="50" inputMode="numeric" value={cartItem.units} onChange={handleCartItemChange}
                           className="w-full border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-[#C21C24] outline-none" />
                       </div>
                     </div>

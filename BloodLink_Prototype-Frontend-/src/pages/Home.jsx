@@ -15,6 +15,7 @@ import prcLogo from '../assets/bloodlinks_logo/prc-logo.png';
 import snbcLogo from '../assets/bloodlinks_logo/snbc-removebg-preview.png';
 import davaoLogo from '../assets/bloodlinks_logo/davao-logo.png';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
+import { isValidEmail } from '../utils/validation';
 
 // ── Facility photos ──
 import spmc1 from '../assets/facilities/spmc/spmc-1.jpg';
@@ -484,8 +485,12 @@ export default function Home() {
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
-    if (!email) {
-      setLoginError('Email is required.');
+    if (!isValidEmail(email)) {
+      setLoginError('Enter a valid email address.');
+      return;
+    }
+    if (!password || password.length < 6) {
+      setLoginError('Enter a password with at least 6 characters.');
       return;
     }
 
@@ -775,7 +780,7 @@ export default function Home() {
                 <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
                 <div className="relative">
                   <input
-                    type={showPassword ? 'text' : 'password'}
+                    required minLength={6} type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full border border-slate-200 rounded-lg p-2.5 pr-10 text-sm focus:ring-2 focus:ring-slate-400 outline-none transition-all"
