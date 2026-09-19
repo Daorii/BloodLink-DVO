@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\Log;
 
 class DonorRecallController extends Controller
 {
+    private ?string $lastSmsError = null;
+
     /**
      * Send an SMS through PhilSMS.
      * PhilSMS expects Philippine mobile numbers in international form, e.g.
@@ -20,10 +22,11 @@ class DonorRecallController extends Controller
     {
         $apiToken = env('PHILSMS_API_TOKEN');
         $senderId = env('PHILSMS_SENDER_ID', 'PhilSMS');
-        $apiUrl   = env('PHILSMS_API_URL', 'https://app.philsms.com/api/v3/sms/send');
+        $apiUrl   = env('PHILSMS_API_URL', 'https://dashboard.philsms.com/api/v3/sms/send');
 
         if (!$apiToken) {
             Log::warning('PhilSMS API token not set — SMS skipped.');
+            $this->lastSmsError = 'PhilSMS API token is not configured.';
             return false;
         }
 
@@ -35,6 +38,7 @@ class DonorRecallController extends Controller
 
         if (!preg_match('/^639\d{9}$/', $phone)) {
             Log::warning('PhilSMS skipped an invalid Philippine mobile number.');
+            $this->lastSmsError = 'The donor does not have a valid Philippine mobile number.';
             return false;
         }
 
@@ -57,10 +61,13 @@ class DonorRecallController extends Controller
                 'status' => $response->status(),
                 'body'   => $response->json() ?? $response->body(),
             ]);
+            $this->lastSmsError = data_get($response->json(), 'message')
+                ?? 'PhilSMS could not accept this message.';
             return false;
 
         } catch (\Throwable $e) {
             Log::error('PhilSMS exception: ' . $e->getMessage());
+            $this->lastSmsError = 'The SMS provider could not be reached.';
             return false;
         }
     }
@@ -71,10 +78,8 @@ class DonorRecallController extends Controller
     private function buildMessage(Donor $donor): string
     {
         $firstName = $donor->first_name ?? 'Donor';
-        return "Hi {$firstName}! BloodLink from SNBC-DVO is reaching out. "
-             . "You are now eligible to donate blood again — it has been over 90 days since your last donation. "
-             . "Your blood can save lives! Please visit the Southern Philippines Medical Center Blood Bank "
-             . "(SNBC-DVO) at your earliest convenience. Thank you for your generosity!";
+        return "Hi {$firstName}, BloodLink SNBC-DVO: you are eligible to donate again. "
+             . "Please visit the SPMC Blood Bank when convenient. Thank you!";
     }
 
     // ── Endpoints ─────────────────────────────────────────────────────────
@@ -122,7 +127,7 @@ class DonorRecallController extends Controller
             'recall'  => $this->format($recall->load('donor')),
             'message' => $sent
                 ? 'Recall SMS sent successfully.'
-                : 'Recall logged but SMS delivery failed — check logs.',
+                : 'Recall logged, but SMS was not sent: ' . ($this->lastSmsError ?? 'Unknown PhilSMS error.'),
             'smsSent' => $sent,
         ], 201);
     }

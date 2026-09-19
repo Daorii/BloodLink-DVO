@@ -26,6 +26,9 @@ import {
   Compass
 } from 'lucide-react';
 import { firstValidationError, isPhilippineMobile, isWholeNumber, sanitizePhone } from '../utils/validation';
+import TablePagination from '../components/TablePagination';
+
+const PAGE_SIZE = 10;
 
 export default function DonorDashboard() {
   const navigate = useNavigate();
@@ -47,6 +50,8 @@ export default function DonorDashboard() {
   const [requestSubmitted, setRequestSubmitted] = useState(false);
   const [lastRefNo, setLastRefNo] = useState('');
   const [requestError, setRequestError] = useState('');
+  const [historyPage, setHistoryPage] = useState(1);
+  const [referralPage, setReferralPage] = useState(1);
   
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
@@ -77,6 +82,7 @@ export default function DonorDashboard() {
   const hasActiveRequest = myRequests.some(
     (r) => r.status === 'Pending' || r.status === 'Processing'
   );
+  const pagedRequests = myRequests.slice((referralPage - 1) * PAGE_SIZE, referralPage * PAGE_SIZE);
 
   // Eligibility Math
   const getEligibilityStatus = () => {
@@ -124,6 +130,7 @@ export default function DonorDashboard() {
     { date: 'March 10, 2024', facility: 'SNBC – Mindanao (DOH-Davao)', trigger: 'Routine Donation' },
     { date: 'November 05, 2023', facility: 'SPMC Blood Production Services', trigger: 'First-time Donation' }
   ];
+  const pagedDonationHistory = donationHistory.slice((historyPage - 1) * PAGE_SIZE, historyPage * PAGE_SIZE);
 
   const bloodCenters = [
     { name: 'SPMC Blood Production Services', address: 'JP Laurel Ave, Bajada · Open 24/7', distance: '1.2 km', hours: '24/7', phone: '(082) 227-2731', urgent: true },
@@ -554,9 +561,9 @@ export default function DonorDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {donationHistory.map((d, i) => (
+                  {pagedDonationHistory.map((d, i) => (
                     <tr key={i} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-6 py-3.5 text-xs font-bold text-slate-400">{donationHistory.length - i}</td>
+                      <td className="px-6 py-3.5 text-xs font-bold text-slate-400">{donationHistory.length - ((historyPage - 1) * PAGE_SIZE + i)}</td>
                       <td className="px-6 py-3.5 text-xs font-semibold text-slate-900">{d.date}</td>
                       <td className="px-6 py-3.5 text-xs text-slate-600">{d.facility}</td>
                       <td className="px-6 py-3.5 text-xs text-slate-600">450 mL (Whole Blood)</td>
@@ -575,6 +582,7 @@ export default function DonorDashboard() {
                 </tbody>
               </table>
             </div>
+            <TablePagination total={donationHistory.length} page={historyPage} pageSize={PAGE_SIZE} onPageChange={setHistoryPage} label="records" />
             <div className="px-6 py-3.5 bg-emerald-50/45 border-t border-slate-100 text-xs text-emerald-800 font-semibold">
               Thank you for your consistency. Your 7 registered donations have contributed to saving approximately 21 lives in Davao City.
             </div>
@@ -960,7 +968,7 @@ export default function DonorDashboard() {
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-100 overflow-y-auto max-h-[580px] flex-1">
-                    {myRequests.map((req, i) => (
+                    {pagedRequests.map((req, i) => (
                       <div key={i} className="p-5 hover:bg-slate-50/50 transition-colors">
                         <div className="flex items-start justify-between gap-3 mb-3">
                           <div>
@@ -1004,6 +1012,7 @@ export default function DonorDashboard() {
                         )}
                       </div>
                     ))}
+                    <TablePagination total={myRequests.length} page={referralPage} pageSize={PAGE_SIZE} onPageChange={setReferralPage} label="referrals" />
                   </div>
                 )}
               </div>

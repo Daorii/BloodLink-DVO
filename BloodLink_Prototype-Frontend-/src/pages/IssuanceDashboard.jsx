@@ -13,11 +13,13 @@ import spmcLogo from '../assets/bloodlinks_logo/spmc-logo.png';
 import prcLogo from '../assets/bloodlinks_logo/prc-logo.png';
 import snbcLogo from '../assets/bloodlinks_logo/snbc-removebg-preview.png';
 import davaoLogo from '../assets/bloodlinks_logo/davao-logo.png';
+import TablePagination from '../components/TablePagination';
 
 const COMPONENTS = ['PRBC', 'Platelet Concentrate', 'FFP', 'Cryoprecipitate', 'Cryosupernate'];
 const BLOOD_TYPES = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
 const SAFETY_STATUSES = ['Cleared', 'Hold-Quarantined', 'NCU', 'NS', 'Discarded'];
 const INTENDED_USES = ['Transfusable', 'Storage-Research Only', 'Restricted'];
+const PAGE_SIZE = 10;
 
 // Component specs — volume range (cc) + shelf life (days) based on DOH reference
 const COMPONENT_SPECS = {
@@ -172,6 +174,9 @@ export default function IssuanceDashboard() {
   const [componentFilter,    setComponentFilter]    = useState('All'); // 'All' | 'PRBC' | 'Platelet Concentrate' | etc.
 
   const [reqSubTab,       setReqSubTab]       = useState('pending');
+  const [queuePage,       setQueuePage]       = useState(1);
+  const [inventoryPage,   setInventoryPage]   = useState(1);
+  const [requestPage,     setRequestPage]     = useState(1);
 
   // ── Equity-Based Distribution Reco state ─────────────────────────────
   const [distBT,      setDistBT]      = useState('O+');
@@ -747,7 +752,7 @@ export default function IssuanceDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredQueue.map(req => {
+                    {filteredQueue.slice((queuePage - 1) * PAGE_SIZE, queuePage * PAGE_SIZE).map(req => {
                       const urgency = urgencyConfig[req.urgency] || urgencyConfig.routine;
                       const status  = statusConfig[req.status]   || statusConfig.Pending;
                       const items   = req.items || [];
@@ -847,6 +852,7 @@ export default function IssuanceDashboard() {
                   </tbody>
                 </table>
               </div>
+              <TablePagination total={filteredQueue.length} page={queuePage} pageSize={PAGE_SIZE} onPageChange={setQueuePage} label="requests" />
             </div>
           )}
 
@@ -994,6 +1000,7 @@ export default function IssuanceDashboard() {
                   const statusMatch = unit.inventoryStatus === 'Available';
                   return btMatch && compMatch && statusMatch;
                 });
+                const pagedInventory = filteredInventory.slice((inventoryPage - 1) * PAGE_SIZE, inventoryPage * PAGE_SIZE);
                 return (
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden space-y-4">
                     <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
@@ -1038,7 +1045,7 @@ export default function IssuanceDashboard() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-normal">
-                          {filteredInventory.map(unit => (
+                          {pagedInventory.map(unit => (
                             <tr key={unit.unitId} className="hover:bg-slate-50/50 transition-colors">
                               <td className="px-5 py-3 font-mono font-bold text-slate-900">
                                 <span className="bg-indigo-50 text-indigo-950 border border-indigo-100 px-2 py-0.5 rounded text-[11px] font-mono">{unit.unitId}</span>
@@ -1090,6 +1097,7 @@ export default function IssuanceDashboard() {
                         </tbody>
                       </table>
                     </div>
+                    <TablePagination total={filteredInventory.length} page={inventoryPage} pageSize={PAGE_SIZE} onPageChange={setInventoryPage} label="bags" />
                   </div>
                 );
               })()}
@@ -1101,6 +1109,8 @@ export default function IssuanceDashboard() {
             const verifiedReqs = bloodRequests.filter(r => r.status === 'Verified');
             const readyReqs    = bloodRequests.filter(r => r.status === 'Ready for Release' || r.status === 'Partially Fulfilled');
             const historyReqs  = bloodRequests.filter(r => r.status === 'Released' || r.status === 'Rejected');
+            const activeRequests = reqSubTab === 'pending' ? verifiedReqs : reqSubTab === 'ready' ? readyReqs : historyReqs;
+            const pagedRequests = activeRequests.slice((requestPage - 1) * PAGE_SIZE, requestPage * PAGE_SIZE);
             return (
               <div className="space-y-5 animate-in fade-in duration-200">
                 {/* Sub-tab bar */}
@@ -1110,7 +1120,7 @@ export default function IssuanceDashboard() {
                     { key: 'ready',   label: `Ready for Release (${readyReqs.length})` },
                     { key: 'history', label: 'History' },
                   ].map(t => (
-                    <button key={t.key} onClick={() => setReqSubTab(t.key)}
+                    <button key={t.key} onClick={() => { setReqSubTab(t.key); setRequestPage(1); }}
                       className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
                         reqSubTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                       {t.label}
@@ -1139,7 +1149,7 @@ export default function IssuanceDashboard() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {verifiedReqs.map(req => (
+                          {pagedRequests.map(req => (
                             <tr key={req.refNo} className="hover:bg-slate-50/50 transition-colors">
                               <td className="px-6 py-3.5">
                                 <p className="font-mono text-[10px] font-bold text-slate-400">{req.refNo}</p>
@@ -1193,6 +1203,7 @@ export default function IssuanceDashboard() {
                         </tbody>
                       </table>
                     </div>
+                    <TablePagination total={verifiedReqs.length} page={requestPage} pageSize={PAGE_SIZE} onPageChange={setRequestPage} label="requests" />
                   </div>
                 )}
 
@@ -1215,7 +1226,7 @@ export default function IssuanceDashboard() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {readyReqs.map(req => (
+                          {pagedRequests.map(req => (
                             <tr key={req.refNo} className="hover:bg-slate-50/50">
                               <td className="px-6 py-3.5">
                                 <p className="font-mono text-[10px] font-bold text-slate-400">{req.refNo}</p>
@@ -1250,6 +1261,7 @@ export default function IssuanceDashboard() {
                         </tbody>
                       </table>
                     </div>
+                    <TablePagination total={readyReqs.length} page={requestPage} pageSize={PAGE_SIZE} onPageChange={setRequestPage} label="requests" />
                   </div>
                 )}
 
@@ -1269,7 +1281,7 @@ export default function IssuanceDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {historyReqs.map(req => (
+                        {pagedRequests.map(req => (
                           <tr key={req.refNo}>
                             <td className="px-6 py-3.5 font-mono text-[10px] font-bold text-slate-400">{req.refNo}</td>
                             <td className="px-6 py-3.5 font-bold text-slate-900">{req.hospital}</td>
@@ -1291,6 +1303,7 @@ export default function IssuanceDashboard() {
                         )}
                       </tbody>
                     </table>
+                    <TablePagination total={historyReqs.length} page={requestPage} pageSize={PAGE_SIZE} onPageChange={setRequestPage} label="requests" />
                   </div>
                 )}
               </div>

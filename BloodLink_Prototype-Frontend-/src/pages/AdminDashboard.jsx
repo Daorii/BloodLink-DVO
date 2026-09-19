@@ -105,6 +105,9 @@ import davaoLogo from '../assets/bloodlinks_logo/davao-logo.png';
 import ConfirmationModal from '../components/ConfirmationModal';
 import SuccessModal from '../components/SuccessModal';
 import { isPhilippineMobile, isValidEmail, sanitizePhone } from '../utils/validation';
+import TablePagination from '../components/TablePagination';
+
+const PAGE_SIZE = 10;
 const BLOOD_TYPES = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
 const COMPONENTS = ['PRBC', 'Platelet Concentrate', 'FFP', 'Cryoprecipitate', 'Cryosupernate'];
 
@@ -239,8 +242,13 @@ export default function AdminDashboard() {
   const [adminInventoryBloodType, setAdminInventoryBloodType] = useState('All');
   const [adminInventoryComponent, setAdminInventoryComponent] = useState('All');
   const [adminInventorySearch, setAdminInventorySearch] = useState('');
+  const [adminInventoryPage, setAdminInventoryPage] = useState(1);
   const [adminIssuanceStatus, setAdminIssuanceStatus] = useState('All');
   const [adminIssuanceSearch, setAdminIssuanceSearch] = useState('');
+  const [adminIssuancePage, setAdminIssuancePage] = useState(1);
+  const [adminUserPage, setAdminUserPage] = useState(1);
+  const [adminDonorPage, setAdminDonorPage] = useState(1);
+  const [adminHospitalPage, setAdminHospitalPage] = useState(1);
   const [selectedAdminRequest, setSelectedAdminRequest] = useState(null);
   const [adminDonorBloodType, setAdminDonorBloodType] = useState('All');
   const [adminDonorEligibility, setAdminDonorEligibility] = useState('All');
@@ -1145,10 +1153,12 @@ export default function AdminDashboard() {
                     (adminInventoryBloodType === 'All' || type === adminInventoryBloodType) &&
                     (adminInventoryComponent === 'All' || component === adminInventoryComponent) && matchesQuery;
                 });
+                const pagedUnits = filteredUnits.slice((adminInventoryPage - 1) * PAGE_SIZE, adminInventoryPage * PAGE_SIZE);
                 const clearFilters = () => {
                   setAdminInventoryBloodType('All');
                   setAdminInventoryComponent('All');
                   setAdminInventorySearch('');
+                  setAdminInventoryPage(1);
                 };
                 const selectCell = (type, component) => {
                   if (adminInventoryBloodType === type && adminInventoryComponent === component) clearFilters();
@@ -1208,7 +1218,7 @@ export default function AdminDashboard() {
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-6 py-4">
                       <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500"><Database className="h-4 w-4 text-indigo-600" /> Physical Blood Bag Registry</h3>
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="relative"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" /><input value={adminInventorySearch} onChange={event => setAdminInventorySearch(event.target.value)} placeholder="Search unit or serial" className="w-44 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-xs outline-none focus:border-indigo-400" /></div>
+                        <div className="relative"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" /><input value={adminInventorySearch} onChange={event => { setAdminInventorySearch(event.target.value); setAdminInventoryPage(1); }} placeholder="Search unit or serial" className="w-44 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-xs outline-none focus:border-indigo-400" /></div>
                         <span className="rounded bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">{filteredUnits.length} available bag{filteredUnits.length === 1 ? '' : 's'}</span>
                       </div>
                     </div>
@@ -1217,7 +1227,7 @@ export default function AdminDashboard() {
                         {['Unit ID', 'Serial No.', 'Type', 'Component', 'Collected', 'Expiry', 'Volume (CC)', 'Safety', 'Status'].map(label => <th key={label} className="px-5 py-3 text-center font-bold first:text-left">{label}</th>)}
                       </tr></thead>
                       <tbody className="divide-y divide-slate-100">
-                        {filteredUnits.map(unit => {
+                        {pagedUnits.map(unit => {
                           const expiryDays = unit.expirationDate ? Math.ceil((new Date(unit.expirationDate) - new Date()) / 86400000) : null;
                           const expiring = expiryDays !== null && expiryDays >= 0 && expiryDays <= 7;
                           return <tr key={unit.unitId} className="transition-colors hover:bg-slate-50/50">
@@ -1235,6 +1245,7 @@ export default function AdminDashboard() {
                         {filteredUnits.length === 0 && <tr><td colSpan={9} className="px-5 py-8 text-center text-xs text-slate-400">No available blood bags match the current filters.</td></tr>}
                       </tbody>
                     </table></div>
+                    <TablePagination total={filteredUnits.length} page={adminInventoryPage} pageSize={PAGE_SIZE} onPageChange={setAdminInventoryPage} label="bags" />
                   </div>
                 </>;
               })()}
@@ -1656,7 +1667,7 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-650">
-                      {users.map((u) => {
+                      {users.slice((adminUserPage - 1) * PAGE_SIZE, adminUserPage * PAGE_SIZE).map((u) => {
                         const roleColors = {
                           'Super Admin': 'bg-purple-50 border-purple-200 text-purple-700',
                           'Administrator': 'bg-blue-50 border-blue-200 text-blue-700',
@@ -1716,6 +1727,7 @@ export default function AdminDashboard() {
                     </tbody>
                   </table>
                 </div>
+                <TablePagination total={users.length} page={adminUserPage} pageSize={PAGE_SIZE} onPageChange={setAdminUserPage} label="users" />
               </div>
             </div>
           )}
@@ -1735,6 +1747,7 @@ export default function AdminDashboard() {
               const matchesSearch = !query || [donor.name, donor.bloodType, donor.phone, donor.address, donor.status].some(value => String(value ?? '').toLowerCase().includes(query));
               return matchesSearch && (adminDonorBloodType === 'All' || donor.bloodType === adminDonorBloodType) && (adminDonorEligibility === 'All' || donorEligibility(donor) === adminDonorEligibility);
             });
+            const pagedDonors = filteredDonors.slice((adminDonorPage - 1) * PAGE_SIZE, adminDonorPage * PAGE_SIZE);
             const eligibleCount = donors.filter(donor => donorEligibility(donor) === 'Eligible').length;
             const deferredCount = donors.filter(donor => donorEligibility(donor) === 'Deferred').length;
             const dueForRecall = donors.filter(donor => donor.lastDonation && Math.floor((Date.now() - new Date(donor.lastDonation)) / 86400000) >= 90).length;
@@ -1753,7 +1766,8 @@ export default function AdminDashboard() {
                   <div><h3 className="text-sm font-bold text-slate-900">Donor Directory</h3><p className="mt-0.5 text-xs text-slate-500">Read-only donor profile, donation, and eligibility monitoring.</p></div>
                   <div className="flex flex-wrap gap-2"><div className="relative"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" /><input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search name, phone, location" className="w-48 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-xs outline-none focus:border-indigo-400" /></div><select value={adminDonorBloodType} onChange={event => setAdminDonorBloodType(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600"><option>All</option>{BLOOD_TYPES.map(type => <option key={type}>{type}</option>)}</select><select value={adminDonorEligibility} onChange={event => setAdminDonorEligibility(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600">{['All', 'Eligible', 'Waiting period', 'Deferred'].map(status => <option key={status}>{status}</option>)}</select><button onClick={fetchDonorsFromAPI} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" /> Refresh</button></div>
                 </div>
-                <div className="overflow-x-auto"><table className="w-full border-collapse text-left text-xs text-slate-650"><thead><tr className="border-b border-slate-200 bg-slate-50 uppercase tracking-wider text-slate-400"><th className="px-5 py-3 font-bold">Donor</th><th className="px-5 py-3 text-center font-bold">Blood type</th><th className="px-5 py-3 font-bold">Contact</th><th className="px-5 py-3 font-bold">Location</th><th className="px-5 py-3 text-center font-bold">Last donation</th><th className="px-5 py-3 text-center font-bold">Eligibility</th><th className="px-5 py-3 text-right font-bold">Profile</th></tr></thead><tbody className="divide-y divide-slate-100">{filteredDonors.map(donor => { const eligibility = donorEligibility(donor); return <tr key={donor.id} className="hover:bg-slate-50/50"><td className="px-5 py-3"><p className="font-bold text-slate-900">{donor.name}</p><p className="text-[10px] text-slate-400">{donor.totalDonations || 0} donation{Number(donor.totalDonations || 0) === 1 ? '' : 's'} recorded</p></td><td className="px-5 py-3 text-center"><span className="rounded border border-rose-100 bg-rose-50 px-1.5 py-0.5 font-mono text-[10px] font-black text-[#C21C24]">{donor.bloodType || '—'}</span></td><td className="px-5 py-3 font-mono text-[11px] text-slate-600">{donor.phone || '—'}</td><td className="max-w-[13rem] truncate px-5 py-3 text-slate-600">{donor.address || '—'}</td><td className="px-5 py-3 text-center font-mono text-[10px]">{donor.lastDonation || 'No donation yet'}</td><td className="px-5 py-3 text-center"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${eligibilityClass(eligibility)}`}>{eligibility}</span></td><td className="px-5 py-3 text-right"><button onClick={() => setSelectedAdminDonor(donor)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50"><FileText className="h-3.5 w-3.5" /> View details</button></td></tr>; })}{filteredDonors.length === 0 && <tr><td colSpan={7} className="px-5 py-8 text-center text-slate-400">No donors match the current filters.</td></tr>}</tbody></table></div>
+                <div className="overflow-x-auto"><table className="w-full border-collapse text-left text-xs text-slate-650"><thead><tr className="border-b border-slate-200 bg-slate-50 uppercase tracking-wider text-slate-400"><th className="px-5 py-3 font-bold">Donor</th><th className="px-5 py-3 text-center font-bold">Blood type</th><th className="px-5 py-3 font-bold">Contact</th><th className="px-5 py-3 font-bold">Location</th><th className="px-5 py-3 text-center font-bold">Last donation</th><th className="px-5 py-3 text-center font-bold">Eligibility</th><th className="px-5 py-3 text-right font-bold">Profile</th></tr></thead><tbody className="divide-y divide-slate-100">{pagedDonors.map(donor => { const eligibility = donorEligibility(donor); return <tr key={donor.id} className="hover:bg-slate-50/50"><td className="px-5 py-3"><p className="font-bold text-slate-900">{donor.name}</p><p className="text-[10px] text-slate-400">{donor.totalDonations || 0} donation{Number(donor.totalDonations || 0) === 1 ? '' : 's'} recorded</p></td><td className="px-5 py-3 text-center"><span className="rounded border border-rose-100 bg-rose-50 px-1.5 py-0.5 font-mono text-[10px] font-black text-[#C21C24]">{donor.bloodType || '—'}</span></td><td className="px-5 py-3 font-mono text-[11px] text-slate-600">{donor.phone || '—'}</td><td className="max-w-[13rem] truncate px-5 py-3 text-slate-600">{donor.address || '—'}</td><td className="px-5 py-3 text-center font-mono text-[10px]">{donor.lastDonation || 'No donation yet'}</td><td className="px-5 py-3 text-center"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${eligibilityClass(eligibility)}`}>{eligibility}</span></td><td className="px-5 py-3 text-right"><button onClick={() => setSelectedAdminDonor(donor)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50"><FileText className="h-3.5 w-3.5" /> View details</button></td></tr>; })}{filteredDonors.length === 0 && <tr><td colSpan={7} className="px-5 py-8 text-center text-slate-400">No donors match the current filters.</td></tr>}</tbody></table></div>
+                <TablePagination total={filteredDonors.length} page={adminDonorPage} pageSize={PAGE_SIZE} onPageChange={setAdminDonorPage} label="donors" />
               </div>
               {selectedAdminDonor && createPortal(<div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm"><section className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"><div className="flex items-center justify-between border-b border-slate-100 px-6 py-4"><div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100"><Users className="h-4 w-4 text-indigo-600" /></div><div><h3 className="text-sm font-bold text-slate-900">{selectedAdminDonor.name}</h3><p className="text-[10px] font-semibold text-slate-400">{selectedAdminDonor.bloodType || 'Unknown blood type'} · {donorEligibility(selectedAdminDonor)}</p></div></div><button onClick={() => setSelectedAdminDonor(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X className="h-5 w-5" /></button></div><div className="grid grid-cols-4 gap-3 border-b border-slate-100 bg-slate-50 px-6 py-3 text-[10px]"><div><p className="uppercase tracking-wider text-slate-400">Contact</p><p className="mt-0.5 font-semibold text-slate-700">{selectedAdminDonor.phone || '—'}</p></div><div><p className="uppercase tracking-wider text-slate-400">Location</p><p className="mt-0.5 font-semibold text-slate-700">{selectedAdminDonor.address || '—'}</p></div><div><p className="uppercase tracking-wider text-slate-400">Last donation</p><p className="mt-0.5 font-semibold text-slate-700">{selectedAdminDonor.lastDonation || '—'}</p></div><div><p className="uppercase tracking-wider text-slate-400">Donations</p><p className="mt-0.5 font-semibold text-slate-700">{selectedAdminDonor.totalDonations || 0}</p></div></div><div className="space-y-4 overflow-y-auto p-6"><div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Eligibility status</p><span className={`mt-2 inline-flex rounded border px-2 py-1 text-xs font-bold ${eligibilityClass(donorEligibility(selectedAdminDonor))}`}>{donorEligibility(selectedAdminDonor)}</span></div><div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Registry remarks</p><p className="mt-1 rounded-xl bg-slate-50 p-3 text-sm text-slate-700">{selectedAdminDonor.remarks || 'No remarks recorded.'}</p></div><div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-[10px] font-semibold text-blue-700">This profile is view-only. Registry staff manage donor registration, medical deferrals, and record updates.</div></div></section></div>, document.body)}
             </div>;
@@ -1972,6 +1986,7 @@ export default function AdminDashboard() {
               return (adminIssuanceStatus === 'All' || request.status === adminIssuanceStatus) &&
                 (!query || values.some(value => String(value ?? '').toLowerCase().includes(query)));
             });
+            const pagedRequests = filteredRequests.slice((adminIssuancePage - 1) * PAGE_SIZE, adminIssuancePage * PAGE_SIZE);
             const openCount = bloodRequests.filter(requestIsOpen).length;
             const urgentCount = bloodRequests.filter(request => requestIsOpen(request) && requestIsUrgent(request)).length;
             const readyCount = bloodRequests.filter(request => request.status === 'Ready for Release').length;
@@ -1997,9 +2012,10 @@ export default function AdminDashboard() {
                   <div className="flex flex-wrap gap-2"><div className="relative"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" /><input value={adminIssuanceSearch} onChange={event => setAdminIssuanceSearch(event.target.value)} placeholder="Search request or hospital" className="w-48 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-xs outline-none focus:border-indigo-400" /></div><select value={adminIssuanceStatus} onChange={event => setAdminIssuanceStatus(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600 outline-none">{statuses.map(status => <option key={status}>{status}</option>)}</select><button onClick={() => { fetchBloodRequestsFromAPI(); fetchBloodIssuancesFromAPI(); }} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" /> Refresh</button></div>
                 </div>
                 <div className="overflow-x-auto"><table className="w-full border-collapse text-left text-xs text-slate-650"><thead><tr className="border-b border-slate-200 bg-slate-50 uppercase tracking-wider text-slate-400"><th className="px-5 py-3 font-bold">Reference</th><th className="px-5 py-3 font-bold">Hospital</th><th className="px-5 py-3 font-bold">Required components</th><th className="px-5 py-3 text-center font-bold">Urgency</th><th className="px-5 py-3 text-center font-bold">Needed</th><th className="px-5 py-3 text-center font-bold">Status</th><th className="px-5 py-3 text-right font-bold">Record</th></tr></thead><tbody className="divide-y divide-slate-100">
-                  {filteredRequests.map(request => <tr key={request.refNo} className="hover:bg-slate-50/50"><td className="px-5 py-3 font-mono font-bold text-indigo-700">{request.refNo}</td><td className="px-5 py-3"><p className="font-bold text-slate-900">{request.hospital}</p><p className="text-[10px] text-slate-400">{request.submittedAt || '—'}</p></td><td className="px-5 py-3">{(request.items || []).map(item => <span key={`${item.bloodType}-${item.component}`} className="mb-1 mr-1 inline-flex rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-bold">{item.bloodType} · {item.component} · {item.units}</span>)}</td><td className="px-5 py-3 text-center"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${String(request.urgency).toLowerCase() === 'emergency' ? 'border-rose-100 bg-rose-50 text-rose-700' : String(request.urgency).toLowerCase() === 'urgent' ? 'border-amber-100 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>{request.urgency}</span></td><td className="px-5 py-3 text-center font-mono text-[10px]">{request.dateNeeded || '—'}</td><td className="px-5 py-3 text-center"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${statusStyle(request.status)}`}>{request.status}</span></td><td className="px-5 py-3 text-right"><button onClick={() => setSelectedAdminRequest(request)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50"><FileText className="h-3.5 w-3.5" /> View details</button></td></tr>)}
+                  {pagedRequests.map(request => <tr key={request.refNo} className="hover:bg-slate-50/50"><td className="px-5 py-3 font-mono font-bold text-indigo-700">{request.refNo}</td><td className="px-5 py-3"><p className="font-bold text-slate-900">{request.hospital}</p><p className="text-[10px] text-slate-400">{request.submittedAt || '—'}</p></td><td className="px-5 py-3">{(request.items || []).map(item => <span key={`${item.bloodType}-${item.component}`} className="mb-1 mr-1 inline-flex rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-bold">{item.bloodType} · {item.component} · {item.units}</span>)}</td><td className="px-5 py-3 text-center"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${String(request.urgency).toLowerCase() === 'emergency' ? 'border-rose-100 bg-rose-50 text-rose-700' : String(request.urgency).toLowerCase() === 'urgent' ? 'border-amber-100 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>{request.urgency}</span></td><td className="px-5 py-3 text-center font-mono text-[10px]">{request.dateNeeded || '—'}</td><td className="px-5 py-3 text-center"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${statusStyle(request.status)}`}>{request.status}</span></td><td className="px-5 py-3 text-right"><button onClick={() => setSelectedAdminRequest(request)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50"><FileText className="h-3.5 w-3.5" /> View details</button></td></tr>)}
                   {filteredRequests.length === 0 && <tr><td colSpan={7} className="px-5 py-8 text-center text-slate-400">No requests match the current filters.</td></tr>}
                 </tbody></table></div>
+                <TablePagination total={filteredRequests.length} page={adminIssuancePage} pageSize={PAGE_SIZE} onPageChange={setAdminIssuancePage} label="requests" />
               </div>
 
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-6 py-4"><h3 className="text-sm font-bold text-slate-900">Issuance Release History</h3><p className="mt-0.5 text-xs text-slate-500">Prepared and released component records.</p></div><div className="overflow-x-auto"><table className="w-full border-collapse text-left text-xs text-slate-650"><thead><tr className="border-b border-slate-200 bg-slate-50 uppercase tracking-wider text-slate-400"><th className="px-5 py-3 font-bold">Issuance</th><th className="px-5 py-3 font-bold">Request</th><th className="px-5 py-3 font-bold">Hospital</th><th className="px-5 py-3 font-bold">Components</th><th className="px-5 py-3 font-bold">Processed by</th><th className="px-5 py-3 text-center font-bold">Status</th><th className="px-5 py-3 font-bold">Release date</th></tr></thead><tbody className="divide-y divide-slate-100">{bloodIssuances.slice(0, 10).map(issuance => <tr key={issuance.issuanceId} className="hover:bg-slate-50/50"><td className="px-5 py-3 font-mono font-bold text-indigo-700">{issuance.issuanceRef}</td><td className="px-5 py-3 font-mono text-slate-500">{issuance.requestRef}</td><td className="px-5 py-3 font-bold text-slate-800">{issuance.hospital}</td><td className="px-5 py-3">{(issuance.items || []).map(item => <span key={`${item.bloodType}-${item.component}`} className="mb-1 mr-1 inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold">{item.bloodType} · {item.component} · {item.quantityIssued}</span>)}</td><td className="px-5 py-3">{issuance.processedBy}</td><td className="px-5 py-3 text-center"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${statusStyle(issuance.status)}`}>{issuance.status}</span></td><td className="px-5 py-3 text-[11px] text-slate-500">{issuance.releaseDate || issuance.issuanceDate || '—'}</td></tr>)}{bloodIssuances.length === 0 && <tr><td colSpan={7} className="px-5 py-8 text-center text-slate-400">No issuance records have been created yet.</td></tr>}</tbody></table></div></div>
@@ -2207,7 +2223,7 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-650">
-                      {hospitals.map(h => (
+                      {hospitals.slice((adminHospitalPage - 1) * PAGE_SIZE, adminHospitalPage * PAGE_SIZE).map(h => (
                         <tr key={h.id} className="hover:bg-slate-50/50 transition-colors">
                           <td className="px-6 py-4 font-mono text-[11px] font-bold text-slate-400">{h.id}</td>
                           <td className="px-6 py-4">
@@ -2246,6 +2262,7 @@ export default function AdminDashboard() {
                     </tbody>
                   </table>
                 </div>
+                <TablePagination total={hospitals.length} page={adminHospitalPage} pageSize={PAGE_SIZE} onPageChange={setAdminHospitalPage} label="hospitals" />
               </div>
             </div>
           )}

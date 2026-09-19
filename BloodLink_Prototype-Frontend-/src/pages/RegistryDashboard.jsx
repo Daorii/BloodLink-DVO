@@ -31,6 +31,7 @@ import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
 import ConfirmationModal from '../components/ConfirmationModal';
 import SuccessModal from '../components/SuccessModal';
 import { firstValidationError, isAtLeastAge, isPhilippineMobile, isPastOrToday, isValidEmail, sanitizePhone } from '../utils/validation';
+import TablePagination from '../components/TablePagination';
 
 const BLOOD_TYPES = ['All', 'O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
 const ITEMS_PER_PAGE = 5;
@@ -67,6 +68,7 @@ export default function RegistryDashboard() {
   const [registryPage, setRegistryPage] = useState(1);
   const [recallPage, setRecallPage] = useState(1);
   const [labPage, setLabPage] = useState(1);
+  const [recallHistoryPage, setRecallHistoryPage] = useState(1);
 
   // Add Donor Drawer State
   const [showDrawer, setShowDrawer] = useState(false);
@@ -383,6 +385,7 @@ export default function RegistryDashboard() {
   }, [filteredRecallDonors, recallPage]);
 
   const totalRecallPages = Math.max(1, Math.ceil(filteredRecallDonors.length / ITEMS_PER_PAGE));
+  const paginatedRecalls = (recalls || []).slice((recallHistoryPage - 1) * ITEMS_PER_PAGE, recallHistoryPage * ITEMS_PER_PAGE);
 
   // Individual SMS Recall
   const handleRecall = (id) => {
@@ -1060,7 +1063,7 @@ export default function RegistryDashboard() {
                           </td>
                         </tr>
                       ) : (
-                        recalls.map(r => (
+                        paginatedRecalls.map(r => (
                           <tr key={r.recallId} className="hover:bg-slate-50/50 transition-colors">
                             <td className="px-5 py-3 font-mono font-bold text-slate-400 text-[10px]">
                               REC-{String(r.recallId ?? r.recall_id ?? '').padStart(3,'0')}
@@ -1100,6 +1103,7 @@ export default function RegistryDashboard() {
                     </tbody>
                   </table>
                 </div>
+                <TablePagination total={recalls.length} page={recallHistoryPage} pageSize={ITEMS_PER_PAGE} onPageChange={setRecallHistoryPage} label="records" />
               </div>
 
             </div>
@@ -1254,12 +1258,20 @@ export default function RegistryDashboard() {
           setRecallConfirm({ isOpen: false, donorId: '', donorName: '', isBulk: false });
           try {
             if (isBulk) {
-              await dispatchBulkRecallSMS(selectedRecallIds);
+              const result = await dispatchBulkRecallSMS(selectedRecallIds);
               setSelectedRecallIds([]);
-              setRecallSuccess({ isOpen: true, message: `Bulk SMS recall dispatched to ${donorName} via Semaphore Gateway.` });
+              if (result.failed > 0) {
+                setNoticeModal({ isOpen: true, title: 'Some SMS Messages Were Not Sent', message: `${result.sent} of ${result.count} recall SMS message(s) were sent. The remaining messages are recorded as failed in the dispatch history.`, variant: 'warning' });
+              } else {
+                setRecallSuccess({ isOpen: true, message: `Bulk SMS recall dispatched to ${donorName} via PhilSMS.` });
+              }
             } else {
-              await dispatchRecallSMS(donorId);
-              setRecallSuccess({ isOpen: true, message: `Recall SMS dispatched to ${donorName} via Semaphore Gateway.` });
+              const result = await dispatchRecallSMS(donorId);
+              if (result.smsSent) {
+                setRecallSuccess({ isOpen: true, message: `Recall SMS dispatched to ${donorName} via PhilSMS.` });
+              } else {
+                setNoticeModal({ isOpen: true, title: 'SMS Was Not Sent', message: result.message || 'PhilSMS rejected the message. Check the dispatch history for the failed record.', variant: 'warning' });
+              }
             }
             fetchRecallsFromAPI(); // refresh history
           } catch {

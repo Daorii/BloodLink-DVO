@@ -7,11 +7,13 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
+import TablePagination from '../components/TablePagination';
 
 const BLOOD_TYPES = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
 const COMPONENTS = ['PRBC', 'Platelet Concentrate', 'FFP', 'Cryoprecipitate', 'Cryosupernate'];
 const SAFETY_STATUSES = ['Cleared', 'Hold-Quarantined', 'NCU', 'NS', 'Discarded'];
 const INTENDED_USES = ['Transfusable', 'Storage-Research Only', 'Restricted'];
+const PAGE_SIZE = 10;
 
 const emptyUnitForm = {
   unitId: '',
@@ -52,6 +54,8 @@ export default function BloodBankDashboard() {
   const [isPartial, setIsPartial] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [reqSubTab, setReqSubTab] = useState('pending'); // 'pending' | 'ready' | 'history'
+  const [inventoryPage, setInventoryPage] = useState(1);
+  const [requestPage, setRequestPage] = useState(1);
 
   // Load from DB on mount
   useEffect(() => {
@@ -121,6 +125,8 @@ export default function BloodBankDashboard() {
   const pendingRequests = bloodRequests.filter(req => req.status === 'Verified');
   const readyRequests   = bloodRequests.filter(req => req.status === 'Ready for Release' || req.status === 'Partially Fulfilled');
   const historyRequests = bloodRequests.filter(req => req.status === 'Released' || req.status === 'Rejected');
+  const activeRequests = reqSubTab === 'pending' ? pendingRequests : reqSubTab === 'ready' ? readyRequests : historyRequests;
+  const pagedRequests = activeRequests.slice((requestPage - 1) * PAGE_SIZE, requestPage * PAGE_SIZE);
 
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
@@ -341,6 +347,7 @@ export default function BloodBankDashboard() {
                   if (selectedTypeFilter === 'All') return true;
                   return unit.bloodTypeId === selectedTypeFilter;
                 });
+                const pagedInventory = filteredInventory.slice((inventoryPage - 1) * PAGE_SIZE, inventoryPage * PAGE_SIZE);
 
                 return (
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden space-y-4">
@@ -353,7 +360,7 @@ export default function BloodBankDashboard() {
                           <span className="text-[10px] bg-rose-50 border border-rose-200 text-rose-700 font-bold px-2 py-0.5 rounded flex items-center gap-1">
                             Filtered by {selectedTypeFilter}
                             <button
-                              onClick={() => setSelectedTypeFilter('All')}
+                              onClick={() => { setSelectedTypeFilter('All'); setInventoryPage(1); }}
                               className="hover:text-rose-900 font-extrabold ml-1 cursor-pointer"
                               title="Clear filter"
                             >
@@ -368,7 +375,7 @@ export default function BloodBankDashboard() {
                         {['All', ...BLOOD_TYPES].map(type => (
                           <button
                             key={type}
-                            onClick={() => setSelectedTypeFilter(type)}
+                            onClick={() => { setSelectedTypeFilter(type); setInventoryPage(1); }}
                             className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono transition-colors cursor-pointer ${selectedTypeFilter === type
                               ? 'bg-slate-900 text-white shadow-xs'
                               : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -400,7 +407,7 @@ export default function BloodBankDashboard() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-normal">
-                          {filteredInventory.map(unit => (
+                          {pagedInventory.map(unit => (
                             <tr key={unit.unitId} className="hover:bg-slate-50/50 transition-colors">
                               <td className="px-5 py-3 font-mono font-bold text-slate-900">
                                 <div className="flex items-center gap-1.5">
@@ -450,6 +457,7 @@ export default function BloodBankDashboard() {
                         </tbody>
                       </table>
                     </div>
+                    <TablePagination total={filteredInventory.length} page={inventoryPage} pageSize={PAGE_SIZE} onPageChange={setInventoryPage} label="bags" />
                   </div>
                 );
               })()}
@@ -467,7 +475,7 @@ export default function BloodBankDashboard() {
                   { key: 'ready',   label: `Ready for Release (${readyRequests.length})` },
                   { key: 'history', label: 'History' },
                 ].map(t => (
-                  <button key={t.key} onClick={() => setReqSubTab(t.key)}
+                  <button key={t.key} onClick={() => { setReqSubTab(t.key); setRequestPage(1); }}
                     className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
                       reqSubTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
                     }`}>
@@ -497,7 +505,7 @@ export default function BloodBankDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {pendingRequests.map(req => (
+                        {pagedRequests.map(req => (
                           <tr key={req.refNo} className="hover:bg-slate-50/50 transition-colors">
                             <td className="px-6 py-3.5">
                               <p className="font-mono text-[10px] font-bold text-slate-400">{req.refNo}</p>
@@ -555,6 +563,7 @@ export default function BloodBankDashboard() {
                       </tbody>
                     </table>
                   </div>
+                  <TablePagination total={pendingRequests.length} page={requestPage} pageSize={PAGE_SIZE} onPageChange={setRequestPage} label="requests" />
                 </div>
               )}
 
@@ -577,7 +586,7 @@ export default function BloodBankDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {readyRequests.map(req => (
+                        {pagedRequests.map(req => (
                           <tr key={req.refNo} className="hover:bg-slate-50/50">
                             <td className="px-6 py-3.5">
                               <p className="font-mono text-[10px] font-bold text-slate-400">{req.refNo}</p>
@@ -606,6 +615,7 @@ export default function BloodBankDashboard() {
                       </tbody>
                     </table>
                   </div>
+                  <TablePagination total={readyRequests.length} page={requestPage} pageSize={PAGE_SIZE} onPageChange={setRequestPage} label="requests" />
                 </div>
               )}
 
@@ -625,7 +635,7 @@ export default function BloodBankDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {historyRequests.map(req => (
+                      {pagedRequests.map(req => (
                         <tr key={req.refNo}>
                           <td className="px-6 py-3.5 font-mono text-[10px] font-bold text-slate-400">{req.refNo}</td>
                           <td className="px-6 py-3.5 font-bold text-slate-900">{req.hospital}</td>
@@ -648,6 +658,7 @@ export default function BloodBankDashboard() {
                       )}
                     </tbody>
                   </table>
+                  <TablePagination total={historyRequests.length} page={requestPage} pageSize={PAGE_SIZE} onPageChange={setRequestPage} label="requests" />
                 </div>
               )}
             </div>
