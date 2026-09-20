@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
+import ConfirmModal from '../components/ConfirmModal';
 import spmcLogo from '../assets/bloodlinks_logo/spmc-logo.png';
 import prcLogo from '../assets/bloodlinks_logo/prc-logo.png';
 import snbcLogo from '../assets/bloodlinks_logo/snbc-removebg-preview.png';
@@ -92,6 +93,7 @@ export default function IssuanceDashboard() {
     processBloodRequest,
     bloodInventory,
     recordBloodUnit,
+    verifyBloodUnit,
     donations,
     donors,
     labTestResults,
@@ -170,6 +172,10 @@ export default function IssuanceDashboard() {
   const [serialInput,       setSerialInput]       = useState('');
   const [serialStatus,      setSerialStatus]      = useState(null); // null | 'found' | 'not_found'
   const [volumeError,       setVolumeError]       = useState('');
+  const [declineModal,      setDeclineModal]      = useState({ isOpen: false, unit: null, reason: '' });
+  const [confirmState,      setConfirmState]      = useState({ isOpen: false, title: '', message: '', confirmText: 'Confirm', variant: 'default', onConfirm: null });
+  const closeConfirm = () => setConfirmState(s => ({ ...s, isOpen: false, onConfirm: null }));
+  const [verifyLoading,     setVerifyLoading]     = useState(false);
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('All');
   const [componentFilter,    setComponentFilter]    = useState('All'); // 'All' | 'PRBC' | 'Platelet Concentrate' | etc.
 
@@ -373,6 +379,8 @@ export default function IssuanceDashboard() {
   // Updated counts using new status values
   const pendingCount      = myRequests.filter(r => r.status === 'Pending Verification' || r.status === 'Pending').length;
   const verifiedCount     = myRequests.filter(r => r.status === 'Verified').length;
+  const pendingVerifUnits = (bloodInventory || []).filter(u => u.inventoryStatus === 'Pending Verification');
+  const pendingVerifCount = pendingVerifUnits.length;
   const readyForReleaseCount = myRequests.filter(r => r.status === 'Ready for Release' || r.status === 'Partially Fulfilled').length;
   const releasedCount     = myRequests.filter(r => r.status === 'Released').length;
   const getInv = (type) => inventory.find(i => i.type === type);
@@ -586,6 +594,15 @@ export default function IssuanceDashboard() {
                   <span className="nav-badge ml-auto bg-slate-700 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">{verifiedCount}</span>
                 )}
               </button>
+              <button onClick={() => setActiveTab('stock_verification')}
+                    className={`w-full text-left nav-link ${activeTab === 'stock_verification' ? 'active' : ''}`}
+                    title={isSidebarCollapsed ? 'Stock Verification' : ""}>
+                    <CheckCircle className="nav-icon" />
+                    <span className="sidebar-copy">Stock Verification</span>
+                    {pendingVerifCount > 0 && (
+                      <span className="nav-badge ml-auto bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">{pendingVerifCount}</span>
+                    )}
+                  </button>
               <button onClick={() => setActiveTab('inventory')}
                     className={`w-full text-left nav-link ${activeTab === 'inventory' ? 'active' : ''}`}
                     title={isSidebarCollapsed ? 'Component Inventory' : ""}>
@@ -817,14 +834,28 @@ export default function IssuanceDashboard() {
                               )}
                               {/* Process — after verified, issuance prepares blood units */}
                               {isIssuanceStaff && req.status === 'Verified' && (
-                                <button onClick={() => openProcess(req)}
+                                <button onClick={() => setConfirmState({
+                                   isOpen: true,
+                                   title: 'Process Blood Request?',
+                                   message: `Prepare units for request ${req.refNo} from ${req.hospitalName || req.hospital || 'hospital'}?`,
+                                   confirmText: 'Process Request',
+                                   variant: 'default',
+                                   onConfirm: () => { closeConfirm(); openProcess(req); },
+                                 })}
                                   className="text-slate-900 hover:bg-slate-100 p-1.5 rounded-lg transition-colors font-bold flex items-center gap-0.5" title="Process Request">
                                   <Database className="w-4 h-4 text-slate-700" /> <span className="text-[10px]">Process</span>
                                 </button>
                               )}
                               {/* Approve Release — once units are prepared */}
                               {isIssuanceStaff && (req.status === 'Ready for Release' || req.status === 'Partially Fulfilled') && (
-                                <button onClick={() => handleApproveRelease(req)}
+                                <button onClick={() => setConfirmState({
+                                   isOpen: true,
+                                   title: 'Approve Blood Release?',
+                                   message: `Release blood units for request ${req.refNo}? This will move units out of inventory.`,
+                                   confirmText: 'Approve Release',
+                                   variant: 'warning',
+                                   onConfirm: () => { closeConfirm(); handleApproveRelease(req); },
+                                 })}
                                   className="text-emerald-700 hover:bg-emerald-50 p-1.5 rounded-lg transition-colors font-bold flex items-center gap-0.5" title="Approve Physical Release">
                                   <CheckCircle className="w-4 h-4 text-emerald-600" /> <span className="text-[10px]">Release</span>
                                 </button>
@@ -853,6 +884,129 @@ export default function IssuanceDashboard() {
                 </table>
               </div>
               <TablePagination total={filteredQueue.length} page={queuePage} pageSize={PAGE_SIZE} onPageChange={setQueuePage} label="requests" />
+            </div>
+          )}
+
+          {isIssuanceStaff && activeTab === 'stock_verification' && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Stock Verification</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Review blood components submitted by Production staff. Accept to add to inventory or decline with a reason.</p>
+                </div>
+              </div>
+
+              {pendingVerifUnits.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
+                  <CheckCircle className="w-12 h-12 text-green-400" />
+                  <p className="text-sm font-medium">No units pending verification</p>
+                  <p className="text-xs">All submitted components have been reviewed.</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Unit ID</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Serial No.</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Blood Type</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Component</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Volume (mL)</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Collected</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Expires</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Safety</th>
+                        <th className="text-center px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {pendingVerifUnits.map(unit => (
+                        <tr key={unit.unit_id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-4 py-3 text-xs font-mono text-slate-700">{unit.unitId}</td>
+                          <td className="px-4 py-3 text-xs text-slate-600">{unit.serialNumber || <span className="text-slate-400 italic">No S/N</span>}</td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">{unit.bloodType}</span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-slate-700">{unit.component}</td>
+                          <td className="px-4 py-3 text-xs text-slate-600">{unit.volumeCC} mL</td>
+                          <td className="px-4 py-3 text-xs text-slate-500">{unit.collectionDate}</td>
+                          <td className="px-4 py-3 text-xs text-slate-500">{unit.expirationDate}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                              unit.safetyStatus === 'Cleared' ? 'bg-green-100 text-green-700' :
+                              unit.safetyStatus === 'NCU' ? 'bg-orange-100 text-orange-700' :
+                              'bg-yellow-100 text-yellow-700'
+                            }`}>{unit.safetyStatus}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={() => setConfirmState({
+                                isOpen: true,
+                                title: 'Accept Blood Unit?',
+                                message: `Accept ${unit.component} (${unit.bloodType}) unit ${unit.unitId} into available inventory?`,
+                                confirmText: 'Accept Unit',
+                                variant: 'default',
+                                onConfirm: async () => { closeConfirm(); setVerifyLoading(true); try { await verifyBloodUnit(unit.unit_id, 'accept'); } finally { setVerifyLoading(false); } },
+                              })}
+                                disabled={verifyLoading}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors disabled:opacity-50"
+                              >
+                                <CheckCircle className="w-3 h-3" /> Accept
+                              </button>
+                              <button
+                                onClick={() => setDeclineModal({ isOpen: true, unit, reason: '' })}
+                                disabled={verifyLoading}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
+                              >
+                                <XCircle className="w-3 h-3" /> Decline
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Decline reason modal */}
+          {declineModal.isOpen && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+                <h3 className="text-base font-bold text-slate-900">Decline Blood Unit</h3>
+                <p className="text-xs text-slate-500">
+                  Unit <span className="font-semibold text-slate-700">{declineModal.unit?.unitId}</span> — {declineModal.unit?.component} ({declineModal.unit?.bloodType})
+                </p>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Reason for declining <span className="text-red-500">*</span></label>
+                  <textarea
+                    rows={3}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
+                    placeholder="e.g. Volume out of range, incorrect labeling, damaged bag..."
+                    value={declineModal.reason}
+                    onChange={e => setDeclineModal(prev => ({ ...prev, reason: e.target.value }))}
+                  />
+                </div>
+                <div className="flex gap-3 pt-1">
+                  <button
+                    onClick={() => setDeclineModal({ isOpen: false, unit: null, reason: '' })}
+                    className="flex-1 px-4 py-2 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+                  >Cancel</button>
+                  <button
+                    disabled={!declineModal.reason.trim() || verifyLoading}
+                    onClick={async () => {
+                      setVerifyLoading(true);
+                      try {
+                        await verifyBloodUnit(declineModal.unit.unit_id, 'decline', declineModal.reason.trim());
+                        setDeclineModal({ isOpen: false, unit: null, reason: '' });
+                      } finally { setVerifyLoading(false); }
+                    }}
+                    className="flex-1 px-4 py-2 text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-40"
+                  >Confirm Decline</button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1189,7 +1343,14 @@ export default function IssuanceDashboard() {
                               </td>
                               <td className="px-6 py-3.5">
                                 <div className="flex items-center justify-center gap-2">
-                                  <button onClick={() => openProcess(req)}
+                                  <button onClick={() => setConfirmState({
+                                   isOpen: true,
+                                   title: 'Process Blood Request?',
+                                   message: `Process request ${req.refNo} from ${req.hospitalName || req.hospital || 'hospital'}?`,
+                                   confirmText: 'Process Request',
+                                   variant: 'default',
+                                   onConfirm: () => { closeConfirm(); openProcess(req); },
+                                 })}
                                     className="bg-slate-900 hover:bg-slate-700 text-white px-2.5 py-1.5 rounded-lg font-bold transition-colors shadow-sm flex items-center gap-1 cursor-pointer text-[11px]">
                                     <CheckCircle className="w-3.5 h-3.5" /> Process
                                   </button>
@@ -1248,7 +1409,14 @@ export default function IssuanceDashboard() {
                                 </span>
                               </td>
                               <td className="px-6 py-3.5 text-center">
-                                <button onClick={() => handleApproveRelease(req)}
+                                <button onClick={() => setConfirmState({
+                                   isOpen: true,
+                                   title: 'Approve Blood Release?',
+                                   message: `Release blood units for request ${req.refNo}? This will move units out of inventory.`,
+                                   confirmText: 'Approve Release',
+                                   variant: 'warning',
+                                   onConfirm: () => { closeConfirm(); handleApproveRelease(req); },
+                                 })}
                                   className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded-lg font-bold transition-colors shadow-sm flex items-center gap-1 mx-auto cursor-pointer text-[11px]">
                                   <CheckCircle className="w-3.5 h-3.5" /> Approve Release
                                 </button>
@@ -2564,7 +2732,14 @@ export default function IssuanceDashboard() {
                               <span className={`px-2 py-0.5 text-[9px] font-bold rounded border ${componentColor(item.component)}`}>{item.component}</span>
                               <span className="text-xs text-slate-700 font-bold">{item.units} unit{item.units !== 1 ? 's' : ''}</span>
                             </div>
-                            <button type="button" onClick={() => handleRemoveCartItem(idx)}
+                            <button type="button" onClick={() => setConfirmState({
+                              isOpen: true,
+                              title: 'Remove Item?',
+                              message: 'Remove this item from the cart?',
+                              confirmText: 'Remove',
+                              variant: 'danger',
+                              onConfirm: () => { closeConfirm(); handleRemoveCartItem(idx); },
+                            })}
                               className="text-slate-300 hover:text-[#C21C24] transition-colors p-1 rounded cursor-pointer" title="Remove item">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -2792,7 +2967,14 @@ export default function IssuanceDashboard() {
               <div className="flex justify-end gap-3">
                 <button onClick={() => { setViewingReq(null); setRejectNote(''); }}
                   className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
-                <button onClick={() => { rejectRequest(viewingReq.refNo); setViewingReq(null); setRejectNote(''); }}
+                <button onClick={() => setConfirmState({
+                  isOpen: true,
+                  title: 'Reject Blood Request?',
+                  message: `Reject request ${viewingReq?.refNo}? This action will notify the requesting hospital.`,
+                  confirmText: 'Reject Request',
+                  variant: 'danger',
+                    onConfirm: () => { closeConfirm(); rejectRequest(viewingReq.refNo); setViewingReq(null); setRejectNote(''); },
+                  })}
                   className="px-4 py-2 text-xs font-bold text-white bg-[#C21C24] hover:bg-[#A8181F] rounded-lg shadow-sm transition-colors flex items-center gap-1.5">
                   <XCircle className="w-3.5 h-3.5" /> Confirm Rejection
                 </button>
@@ -3116,6 +3298,15 @@ export default function IssuanceDashboard() {
         </div>
       )}
 
+      <ConfirmModal
+        isOpen={confirmState.isOpen}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        variant={confirmState.variant}
+        onConfirm={confirmState.onConfirm}
+        onCancel={closeConfirm}
+      />
     </div>
   );
 }

@@ -92,6 +92,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/blood-inventory', [BloodInventoryController::class, 'index']);
     Route::post('/blood-inventory', [BloodInventoryController::class, 'store']);
     Route::put('/blood-inventory/{id}/status', [BloodInventoryController::class, 'updateStatus']);
+    Route::put('/blood-inventory/{id}/verify', [BloodInventoryController::class, 'verify']);
 
     // Blood Issuances
     Route::get('/blood-issuances', [BloodIssuanceController::class, 'index']);

@@ -313,3 +313,10 @@ export async function apiCreateBloodInventory(data) {
 export async function apiUpdateBloodInventoryStatus(id, data) {
   return request(`/blood-inventory/${id}/status`, { method: 'PUT', body: JSON.stringify(data) });
 }
+
+export async function apiVerifyBloodInventory(id, action, rejectionReason = null) {
+  return request(`/blood-inventory/${id}/verify`, {
+    method: 'PUT',
+    body: JSON.stringify({ action, rejection_reason: rejectionReason }),
+  });
+}

@@ -98,6 +98,7 @@ const DAVAO_CITIES_MUNICIPALITIES = [
 ];
 import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
+import ConfirmModal from '../components/ConfirmModal';
 import spmcLogo from '../assets/bloodlinks_logo/spmc-logo.png';
 import prcLogo from '../assets/bloodlinks_logo/prc-logo.png';
 import snbcLogo from '../assets/bloodlinks_logo/snbc-removebg-preview.png';
@@ -284,6 +285,8 @@ export default function AdminDashboard() {
 
   // SMS Recall confirmation modal
   const [showSmsConfirmModal, setShowSmsConfirmModal] = useState(false);
+  const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', confirmText: 'Confirm', variant: 'default', onConfirm: null });
+  const closeConfirm = () => setConfirmState(s => ({ ...s, isOpen: false, onConfirm: null }));
 
   // Hospital demand drilldown (Granular Component Breakdown)
   const [drilldownHospital, setDrilldownHospital] = useState(null); // null = list view, object = detail view
@@ -2252,7 +2255,14 @@ export default function AdminDashboard() {
                                 className="border border-blue-100 bg-blue-50 text-blue-700 font-bold text-[10px] px-2.5 py-1 rounded hover:bg-blue-100 transition"
                               >Edit</button>
                               <button
-                                onClick={() => { if (window.confirm(`Delete ${h.name}?`)) deleteHospital(h.id); }}
+                                onClick={() => setConfirmState({
+                                  isOpen: true,
+                                  title: 'Delete Hospital?',
+                                  message: `Permanently delete "${h.name}"? This action cannot be undone.`,
+                                  confirmText: 'Delete Hospital',
+                                  variant: 'danger',
+                                  onConfirm: () => { closeConfirm(); deleteHospital(h.id); },
+                                })}
                                 className="border border-slate-200 bg-slate-50 text-slate-700 font-bold text-[10px] px-2.5 py-1 rounded hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 transition"
                               >Delete</button>
                             </div>
@@ -3551,11 +3561,14 @@ export default function AdminDashboard() {
                                   Edit
                                 </button>
                                 <button
-                                  onClick={() => {
-                                    if (window.confirm(`Delete donation event ${ev.eventId} (${ev.barangayOrganization || ev.cityMunicipality})?`)) {
-                                      deleteDonationEvent(ev.eventId);
-                                    }
-                                  }}
+                                  onClick={() => setConfirmState({
+                                    isOpen: true,
+                                    title: 'Delete Donation Event?',
+                                    message: `Permanently delete event ${ev.eventId} (${ev.barangayOrganization || ev.cityMunicipality})?`,
+                                    confirmText: 'Delete Event',
+                                    variant: 'danger',
+                                    onConfirm: () => { closeConfirm(); deleteDonationEvent(ev.eventId); },
+                                  })}
                                   className="border border-slate-200 bg-slate-50 text-slate-700 font-bold text-[10px] px-2.5 py-1 rounded hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 transition cursor-pointer"
                                 >
                                   Delete
@@ -3673,20 +3686,32 @@ export default function AdminDashboard() {
                     }
                   }
 
-                  if (editingHospital) {
-                    try {
-                      await updateHospital(editingHospital.id, hospitalForm);
-                    } catch (error) {
-                      return setNoticeModal({ isOpen: true, title: 'Hospital Was Not Updated', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
-                    }
-                  } else {
-                    try {
-                      await addHospital(hospitalForm);
-                    } catch (error) {
-                      return setNoticeModal({ isOpen: true, title: 'Hospital Was Not Saved', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
-                    }
-                  }
-                  setShowHospitalModal(false);
+                  setConfirmState({
+                    isOpen: true,
+                    title: editingHospital ? 'Save Hospital Changes?' : 'Add Hospital / Blood Centre?',
+                    message: editingHospital
+                      ? `Update the record for "${hospitalForm.name}"? Verify all fields are correct.`
+                      : `Register "${hospitalForm.name}" as a new hospital / blood centre?`,
+                    confirmText: editingHospital ? 'Save Changes' : 'Add Hospital',
+                    variant: editingHospital ? 'warning' : 'default',
+                    onConfirm: async () => {
+                      closeConfirm();
+                      if (editingHospital) {
+                        try {
+                          await updateHospital(editingHospital.id, hospitalForm);
+                        } catch (error) {
+                          return setNoticeModal({ isOpen: true, title: 'Hospital Was Not Updated', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
+                        }
+                      } else {
+                        try {
+                          await addHospital(hospitalForm);
+                        } catch (error) {
+                          return setNoticeModal({ isOpen: true, title: 'Hospital Was Not Saved', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
+                        }
+                      }
+                      setShowHospitalModal(false);
+                    },
+                  });
                 }}
                 className="px-4 py-2 bg-slate-900 text-white rounded hover:bg-slate-800 transition-all shadow-sm"
               >
@@ -3876,17 +3901,27 @@ export default function AdminDashboard() {
                       });
                     }
 
-                    try {
-                      await addUser(addUserForm);
-                    } catch (error) {
-                      return setNoticeModal({ isOpen: true, title: 'User Was Not Saved', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
-                    }
-                    setUserSaved(true);
-                    setAddUserForm({ firstName: '', lastName: '', email: '', passwordHash: '', contactNumber: '', role: 'Registry Staff', roleId: 'ROLE-003', status: 'Active', hospitalId: '' });
-                    setTimeout(() => {
-                      setUserSaved(false);
-                      setShowAddUserModal(false);
-                    }, 1200);
+                    setConfirmState({
+                      isOpen: true,
+                      title: 'Register New User?',
+                      message: `Create account for ${addUserForm.firstName} ${addUserForm.lastName} as ${addUserForm.role}? An initial password will be set.`,
+                      confirmText: 'Register User',
+                      variant: 'default',
+                      onConfirm: async () => {
+                        closeConfirm();
+                        try {
+                          await addUser(addUserForm);
+                        } catch (error) {
+                          return setNoticeModal({ isOpen: true, title: 'User Was Not Saved', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
+                        }
+                        setUserSaved(true);
+                        setAddUserForm({ firstName: '', lastName: '', email: '', passwordHash: '', contactNumber: '', role: 'Registry Staff', roleId: 'ROLE-003', status: 'Active', hospitalId: '' });
+                        setTimeout(() => {
+                          setUserSaved(false);
+                          setShowAddUserModal(false);
+                        }, 1200);
+                      },
+                    });
                   }}
                   className="flex-1 px-4 py-2.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition shadow-sm cursor-pointer"
                 >Register User</button>
@@ -4006,17 +4041,27 @@ export default function AdminDashboard() {
                     if (!isValidEmail(editUserForm.email)) return setNoticeModal({ isOpen: true, title: 'Invalid Email', message: 'Enter a valid email address.', variant: 'warning' });
                     if (!isPhilippineMobile(editUserForm.contactNumber)) return setNoticeModal({ isOpen: true, title: 'Invalid Phone Number', message: 'Enter a valid Philippine mobile number.', variant: 'warning' });
                     if (editUserForm.role === 'Hospital User' && !editUserForm.hospitalId) return setNoticeModal({ isOpen: true, title: 'Hospital Required', message: 'Select the affiliated hospital for a Hospital User account.', variant: 'warning' });
-                    try {
-                      await updateUser(editingUser.id, editUserForm);
-                    } catch (error) {
-                      return setNoticeModal({ isOpen: true, title: 'User Was Not Updated', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
-                    }
-                    setEditUserSaved(true);
-                    setTimeout(() => {
-                      setEditUserSaved(false);
-                      setShowEditUserModal(false);
-                      setEditingUser(null);
-                    }, 1400);
+                    setConfirmState({
+                      isOpen: true,
+                      title: 'Save User Changes?',
+                      message: `Update the account for ${editUserForm.firstName} ${editUserForm.lastName}? Please review all fields before confirming.`,
+                      confirmText: 'Save Changes',
+                      variant: 'warning',
+                      onConfirm: async () => {
+                        closeConfirm();
+                        try {
+                          await updateUser(editingUser.id, editUserForm);
+                        } catch (error) {
+                          return setNoticeModal({ isOpen: true, title: 'User Was Not Updated', message: error?.data?.message || error?.message || 'Please correct the information and try again.', variant: 'warning' });
+                        }
+                        setEditUserSaved(true);
+                        setTimeout(() => {
+                          setEditUserSaved(false);
+                          setShowEditUserModal(false);
+                          setEditingUser(null);
+                        }, 1400);
+                      },
+                    });
                   }}
                   className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition shadow-sm cursor-pointer"
                 >Save Changes</button>
@@ -4449,6 +4494,15 @@ export default function AdminDashboard() {
         onClose={() => setAdminRecallSuccess({ isOpen: false, message: '' })}
       />
 
+      <ConfirmModal
+        isOpen={confirmState.isOpen}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        variant={confirmState.variant}
+        onConfirm={confirmState.onConfirm}
+        onCancel={closeConfirm}
+      />
     </div>
   );
 }

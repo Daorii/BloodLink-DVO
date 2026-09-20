@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
+import ConfirmModal from '../components/ConfirmModal';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const COMPONENTS = ['PRBC', 'Platelet Concentrate', 'FFP', 'Cryoprecipitate', 'Cryosupernate'];
@@ -56,11 +57,13 @@ function ComponentBadge({ component }) {
 
 function StatusBadge({ status }) {
   const map = {
-    'Available':  'bg-emerald-50 text-emerald-700 border-emerald-200',
-    'Reserved':   'bg-blue-50 text-blue-700 border-blue-200',
-    'Issued':     'bg-slate-50 text-slate-500 border-slate-200',
-    'Expired':    'bg-rose-50 text-rose-700 border-rose-200',
-    'Discarded':  'bg-stone-50 text-stone-500 border-stone-200',
+    'Available':            'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'Reserved':             'bg-blue-50 text-blue-700 border-blue-200',
+    'Issued':               'bg-slate-50 text-slate-500 border-slate-200',
+    'Expired':              'bg-rose-50 text-rose-700 border-rose-200',
+    'Discarded':            'bg-stone-50 text-stone-500 border-stone-200',
+    'Pending Verification': 'bg-amber-50 text-amber-700 border-amber-200',
+    'Rejected':             'bg-red-50 text-red-700 border-red-200',
   };
   return (
     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border inline-block ${map[status] ?? 'bg-slate-50 text-slate-500 border-slate-200'}`}>
@@ -100,6 +103,8 @@ export default function ProductionDashboard() {
   const [currentPage, setCurrentPage]     = useState(1);
   const [showModal, setShowModal]         = useState(false);
   const [saving, setSaving]               = useState(false);
+  const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', confirmText: 'Confirm', variant: 'default', onConfirm: null });
+  const closeConfirm = () => setConfirmState(s => ({ ...s, isOpen: false, onConfirm: null }));
   const [saved, setSaved]                 = useState(false);
   const [saveError, setSaveError]         = useState('');
   const [lookupStatus, setLookupStatus]   = useState('idle');
@@ -940,7 +945,14 @@ export default function ProductionDashboard() {
                 </button>
                 <button type="button"
                   disabled={!serialNumber || lookupStatus === 'not-found' || lookupStatus === 'deferred' || lookupStatus === 'no-lab' || saving || saved}
-                  onClick={handleSave}
+                  onClick={() => setConfirmState({
+                    isOpen: true,
+                    title: 'Record Blood Components?',
+                    message: `Submit ${componentRows.length} component(s) for S/N ${serialNumber} to inventory. Issuance staff will need to verify before units become available.`,
+                    confirmText: 'Record Components',
+                    variant: 'default',
+                    onConfirm: () => { closeConfirm(); handleSave(); },
+                  })}
                   className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5">
                   {saving ? <><Activity className="w-3 h-3 animate-spin" /> Saving...</> : `Record ${componentRows.length} Component${componentRows.length > 1 ? 's' : ''}`}
                 </button>
@@ -985,6 +997,15 @@ export default function ProductionDashboard() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        isOpen={confirmState.isOpen}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        variant={confirmState.variant}
+        onConfirm={confirmState.onConfirm}
+        onCancel={closeConfirm}
+      />
     </div>
   );
 }

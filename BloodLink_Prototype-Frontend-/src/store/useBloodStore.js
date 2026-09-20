@@ -9,7 +9,7 @@ import { apiCreateLabResult, apiGetLabResults, apiGetDonationBySerial } from '..
 import { apiGetRecalls, apiCreateRecall, apiCreateBulkRecalls } from '../services/api';
 import { apiGetBloodRequests, apiCreateBloodRequest, apiUpdateBloodRequestStatus } from '../services/api';
 import { apiGetBloodIssuances, apiCreateBloodIssuance, apiApproveBloodRelease } from '../services/api';
-import { apiGetBloodInventory, apiCreateBloodInventory } from '../services/api';
+import { apiGetBloodInventory, apiCreateBloodInventory, apiVerifyBloodInventory } from '../services/api';
 
 const initialDonors = [
   // ── Sample Dataset: Donor Registrationssss ──
@@ -1631,6 +1631,14 @@ export const useBloodStore = create(
         } catch (_) { /* non-critical: UI will refresh on next mount */ }
       },
 
+      verifyBloodUnit: async (unitId, action, rejectionReason = null) => {
+        await apiVerifyBloodInventory(unitId, action, rejectionReason);
+        try {
+          const data = await apiGetBloodInventory();
+          if (data.bloodInventory) set({ bloodInventory: data.bloodInventory });
+        } catch (_) { /* non-critical */ }
+      },
+
       approveRecommendation: (recId) => {
         set((state) => {
           const updatedRecs = state.recommendations.map(r => r.recommendationId === recId ? { ...r, status: 'Approved', approvedBy: state.authSystemUser?.id || 'USR-002', actedAt: new Date().toLocaleString() } : r);
@@ -1678,7 +1686,7 @@ export const useBloodStore = create(
         });
       },
 
-      rejectRecommendation: (recId) => {
+            rejectRecommendation: (recId) => {
         set((state) => {
           const updatedRecs = state.recommendations.map(r => r.recommendationId === recId ? { ...r, status: 'Rejected', approvedBy: state.authSystemUser?.id || 'USR-002', actedAt: new Date().toISOString().slice(0, 19) } : r);
 

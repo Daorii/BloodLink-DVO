@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
+import ConfirmModal from '../components/ConfirmModal';
 
 const BLOOD_TYPES = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
 const TTI_TESTS = [
@@ -39,6 +40,8 @@ export default function SerologyDashboard() {
   const [showModal, setShowModal]         = useState(false);
   const [saved, setSaved]                 = useState(false);
   const [saving, setSaving]               = useState(false);
+  const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', confirmText: 'Confirm', variant: 'default', onConfirm: null });
+  const closeConfirm = () => setConfirmState(s => ({ ...s, isOpen: false, onConfirm: null }));
   const [saveError, setSaveError]         = useState('');
   const [lookupStatus, setLookupStatus]   = useState('idle'); // idle | loading | found | not-found | already-done
   const [viewRow, setViewRow]             = useState(null);
@@ -569,7 +572,14 @@ export default function SerologyDashboard() {
                 </button>
                 <button type="button"
                   disabled={!form.serialNumber || lookupStatus === 'already-done' || lookupStatus === 'not-found' || saving}
-                  onClick={handleSave}
+                  onClick={() => setConfirmState({
+                    isOpen: true,
+                    title: 'Submit Lab Result?',
+                    message: `Confirm submission of serology result for S/N: ${form.serialNumber || '—'}. This cannot be undone.`,
+                    confirmText: 'Submit Result',
+                    variant: 'default',
+                    onConfirm: () => { closeConfirm(); handleSave(); },
+                  })}
                   className="px-4 py-2 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5">
                   {saving ? <><Activity className="w-3 h-3 animate-spin" /> Saving...</> : 'Save & Sign Off'}
                 </button>
@@ -614,6 +624,16 @@ export default function SerologyDashboard() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={confirmState.isOpen}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        variant={confirmState.variant}
+        onConfirm={confirmState.onConfirm}
+        onCancel={closeConfirm}
+      />
     </div>
   );
 }

@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
+import ConfirmModal from '../components/ConfirmModal';
 import ConfirmationModal from '../components/ConfirmationModal';
 import SuccessModal from '../components/SuccessModal';
 import { firstValidationError, isAtLeastAge, isPhilippineMobile, isPastOrToday, isValidEmail, sanitizePhone } from '../utils/validation';
@@ -89,6 +90,8 @@ export default function RegistryDashboard() {
   const [editingRegistryDonor, setEditingRegistryDonor] = useState(null);
   const [editDonorForm, setEditDonorForm] = useState({ firstName: '', middleName: '', lastName: '', sex: 'Female', civilStatus: 'Single', dob: '', contactNumber: '', email: '', address: '' });
   const [editDonorSaving, setEditDonorSaving] = useState(false);
+  const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', confirmText: 'Confirm', variant: 'default', onConfirm: null });
+  const closeConfirm = () => setConfirmState(s => ({ ...s, isOpen: false, onConfirm: null }));
 
   // Bulk Selection State for Recalls
   const [selectedRecallIds, setSelectedRecallIds] = useState([]);
@@ -292,8 +295,7 @@ export default function RegistryDashboard() {
     });
   };
 
-  const saveDonorEdit = async (event) => {
-    event.preventDefault();
+  const doSaveDonorEdit = async () => {
     if (!editingRegistryDonor) return;
     const validationError = firstValidationError([
       ['Enter a valid first and last name.', editDonorForm.firstName.trim().length >= 2 && editDonorForm.lastName.trim().length >= 2],
@@ -1283,7 +1285,7 @@ export default function RegistryDashboard() {
 
       {editingRegistryDonor && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <form onSubmit={saveDonorEdit} className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+          <form onSubmit={(e) => { e.preventDefault(); setConfirmState({ isOpen: true, title: 'Save Donor Changes?', message: `Update the profile of ${editDonorForm.firstName} ${editDonorForm.lastName}? Please double-check all fields before confirming.`, confirmText: 'Save Changes', variant: 'warning', onConfirm: () => { closeConfirm(); doSaveDonorEdit(); } }); }} className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
               <div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100"><Edit className="h-4 w-4 text-indigo-600" /></div><div><h3 className="text-sm font-bold text-slate-900">Edit Donor Profile</h3><p className="text-[10px] text-slate-400">Update registry contact and demographic information.</p></div></div>
               <button type="button" onClick={() => setEditingRegistryDonor(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X className="h-5 w-5" /></button>
@@ -1311,6 +1313,16 @@ export default function RegistryDashboard() {
         onClose={() => setRecallSuccess({ isOpen: false, message: '' })}
       />
 
+
+      <ConfirmModal
+        isOpen={confirmState.isOpen}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        variant={confirmState.variant}
+        onConfirm={confirmState.onConfirm}
+        onCancel={closeConfirm}
+      />
 
       {/* DONOR PROFILE / HISTORY MODAL */}
       {viewingDonorProfile && (() => {

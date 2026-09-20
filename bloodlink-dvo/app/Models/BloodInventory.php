@@ -14,6 +14,7 @@ class BloodInventory extends Model
         'volume_cc', 'collection_date', 'expiration_date',
         'safety_status', 'intended_use', 'inventory_status',
         'remarks', 'status_date', 'recorded_by',
+        'rejection_reason', 'verified_by',
     ];
 
     public function donation() { return $this->belongsTo(Donation::class, 'donation_id', 'donation_id'); }
