@@ -12,6 +12,7 @@ use App\Http\Controllers\DonorRecallController;
 use App\Http\Controllers\LabTestResultController;
 use App\Http\Controllers\MLForecastController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\WalkinIssuanceController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -93,6 +94,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/blood-inventory', [BloodInventoryController::class, 'store']);
     Route::put('/blood-inventory/{id}/status', [BloodInventoryController::class, 'updateStatus']);
     Route::put('/blood-inventory/{id}/verify', [BloodInventoryController::class, 'verify']);
+
+    // Walk-in / Direct Issuance
+    Route::get('/walkin-issuances',  [WalkinIssuanceController::class, 'index']);
+    Route::post('/walkin-issuances', [WalkinIssuanceController::class, 'store']);
 
     // Blood Issuances
     Route::get('/blood-issuances', [BloodIssuanceController::class, 'index']);

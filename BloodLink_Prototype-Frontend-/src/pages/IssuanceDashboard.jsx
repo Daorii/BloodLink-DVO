@@ -5,7 +5,7 @@ import {
   LogOut, Plus, Clock,
   CheckCircle, XCircle, AlertTriangle, FileText,
   Droplets, X, Activity, Database, Shield, Trash2, ShoppingCart, Eye,
-  TrendingUp, Search, ChevronDown, ChevronsLeft, ChevronsRight
+  TrendingUp, Search, ChevronDown, ChevronsLeft, ChevronsRight, UserPlus
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
@@ -94,6 +94,9 @@ export default function IssuanceDashboard() {
     bloodInventory,
     recordBloodUnit,
     verifyBloodUnit,
+    walkinIssuances,
+    fetchWalkinIssuances,
+    createWalkinIssuance,
     donations,
     donors,
     labTestResults,
@@ -173,6 +176,12 @@ export default function IssuanceDashboard() {
   const [serialStatus,      setSerialStatus]      = useState(null); // null | 'found' | 'not_found'
   const [volumeError,       setVolumeError]       = useState('');
   const [declineModal,      setDeclineModal]      = useState({ isOpen: false, unit: null, reason: '' });
+  // Walk-in issuance state
+  const [wiForm,            setWiForm]            = useState({ patientName: '', patientAge: '', patientGender: 'Male', diagnosis: '', attendingPhysician: '', purpose: 'Other', remarks: '' });
+  const [wiFilter,          setWiFilter]          = useState({ bloodType: 'All', component: 'All' });
+  const [wiCart,            setWiCart]            = useState([]);
+  const [wiSubmitting,      setWiSubmitting]      = useState(false);
+  const [wiView,            setWiView]            = useState('form'); // 'form' | 'log'
   const [confirmState,      setConfirmState]      = useState({ isOpen: false, title: '', message: '', confirmText: 'Confirm', variant: 'default', onConfirm: null });
   const closeConfirm = () => setConfirmState(s => ({ ...s, isOpen: false, onConfirm: null }));
   const [verifyLoading,     setVerifyLoading]     = useState(false);
@@ -603,6 +612,12 @@ export default function IssuanceDashboard() {
                       <span className="nav-badge ml-auto bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">{pendingVerifCount}</span>
                     )}
                   </button>
+              <button onClick={() => setActiveTab('walkin')}
+                    className={`w-full text-left nav-link ${activeTab === 'walkin' ? 'active' : ''}`}
+                    title={isSidebarCollapsed ? 'Walk-in Issuance' : ""}>
+                    <UserPlus className="nav-icon" />
+                    <span className="sidebar-copy">Walk-in Issuance</span>
+                  </button>
               <button onClick={() => setActiveTab('inventory')}
                     className={`w-full text-left nav-link ${activeTab === 'inventory' ? 'active' : ''}`}
                     title={isSidebarCollapsed ? 'Component Inventory' : ""}>
@@ -886,6 +901,284 @@ export default function IssuanceDashboard() {
               <TablePagination total={filteredQueue.length} page={queuePage} pageSize={PAGE_SIZE} onPageChange={setQueuePage} label="requests" />
             </div>
           )}
+
+
+          {isIssuanceStaff && activeTab === 'walkin' && (() => {
+            const BLOOD_TYPES  = ['All','O+','O-','A+','A-','B+','B-','AB+','AB-'];
+            const COMPONENTS   = ['All','PRBC','Platelet Concentrate','FFP','Cryoprecipitate','Cryosupernate'];
+            const PURPOSES     = ['Surgery','Emergency','Elective','Other'];
+
+            const availableUnits = (bloodInventory || []).filter(u =>
+              u.inventoryStatus === 'Available' &&
+              (wiFilter.bloodType === 'All' || u.bloodType === wiFilter.bloodType) &&
+              (wiFilter.component === 'All' || u.component === wiFilter.component)
+            );
+            const cartIds = wiCart.map(u => u.unit_id);
+
+            const handleAddToWiCart = (unit) => {
+              if (!cartIds.includes(unit.unit_id)) setWiCart(prev => [...prev, unit]);
+            };
+            const handleRemoveWiCart = (uid) => setWiCart(prev => prev.filter(u => u.unit_id !== uid));
+
+            const handleWiSubmit = async () => {
+              if (!wiForm.patientName.trim()) return alert('Patient name is required.');
+              if (wiCart.length === 0) return alert('Add at least one blood unit to the cart.');
+              setWiSubmitting(true);
+              try {
+                await createWalkinIssuance({
+                  patientName:        wiForm.patientName.trim(),
+                  patientAge:         wiForm.patientAge ? Number(wiForm.patientAge) : null,
+                  patientGender:      wiForm.patientGender || null,
+                  diagnosis:          wiForm.diagnosis.trim() || null,
+                  attendingPhysician: wiForm.attendingPhysician.trim() || null,
+                  purpose:            wiForm.purpose,
+                  remarks:            wiForm.remarks.trim() || null,
+                  unitIds:            wiCart.map(u => u.unit_id),
+                });
+                // Reset
+                setWiForm({ patientName: '', patientAge: '', patientGender: 'Male', diagnosis: '', attendingPhysician: '', purpose: 'Other', remarks: '' });
+                setWiCart([]);
+                setWiFilter({ bloodType: 'All', component: 'All' });
+                setWiView('log');
+              } catch (err) {
+                alert(err?.message || 'Failed to submit. Please try again.');
+              } finally { setWiSubmitting(false); }
+            };
+
+            return (
+              <div className="space-y-5 animate-in fade-in duration-200">
+                {/* Header + view toggle */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Walk-in / Direct Issuance</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Issue blood directly to walk-in patients. Units are deducted from inventory immediately.</p>
+                  </div>
+                  <div className="flex rounded-lg overflow-hidden border border-slate-200 text-xs font-semibold">
+                    <button onClick={() => setWiView('form')} className={`px-3 py-1.5 transition-colors ${wiView === 'form' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>New Issuance</button>
+                    <button onClick={() => setWiView('log')} className={`px-3 py-1.5 transition-colors ${wiView === 'log' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Issuance Log</button>
+                  </div>
+                </div>
+
+                {wiView === 'form' ? (
+                  <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+
+                    {/* ── Patient Info Form ── */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Patient Information</h4>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Patient Name <span className="text-red-500">*</span></label>
+                        <input type="text" placeholder="Full name" value={wiForm.patientName}
+                          onChange={e => setWiForm(f => ({ ...f, patientName: e.target.value }))}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Age</label>
+                          <input type="number" min="0" max="130" placeholder="e.g. 34" value={wiForm.patientAge}
+                            onChange={e => setWiForm(f => ({ ...f, patientAge: e.target.value }))}
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Gender</label>
+                          <select value={wiForm.patientGender} onChange={e => setWiForm(f => ({ ...f, patientGender: e.target.value }))}
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                            <option>Male</option><option>Female</option><option>Other</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Diagnosis / Condition</label>
+                        <input type="text" placeholder="e.g. Dengue hemorrhagic fever" value={wiForm.diagnosis}
+                          onChange={e => setWiForm(f => ({ ...f, diagnosis: e.target.value }))}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Attending Physician</label>
+                        <input type="text" placeholder="Dr. Last Name" value={wiForm.attendingPhysician}
+                          onChange={e => setWiForm(f => ({ ...f, attendingPhysician: e.target.value }))}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Purpose</label>
+                        <select value={wiForm.purpose} onChange={e => setWiForm(f => ({ ...f, purpose: e.target.value }))}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                          {PURPOSES.map(p => <option key={p}>{p}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Remarks</label>
+                        <textarea rows={2} placeholder="Optional notes..." value={wiForm.remarks}
+                          onChange={e => setWiForm(f => ({ ...f, remarks: e.target.value }))}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                      </div>
+                    </div>
+
+                    {/* ── Available Units Picker ── */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3 flex flex-col">
+                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Select Units from Inventory</h4>
+                      <div className="flex gap-2">
+                        <select value={wiFilter.bloodType} onChange={e => setWiFilter(f => ({ ...f, bloodType: e.target.value }))}
+                          className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-slate-400">
+                          {BLOOD_TYPES.map(bt => <option key={bt}>{bt}</option>)}
+                        </select>
+                        <select value={wiFilter.component} onChange={e => setWiFilter(f => ({ ...f, component: e.target.value }))}
+                          className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-slate-400">
+                          {COMPONENTS.map(comp => <option key={comp}>{comp}</option>)}
+                        </select>
+                      </div>
+                      <div className="flex-1 overflow-auto max-h-80">
+                        {availableUnits.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-2">
+                            <Database className="w-8 h-8" />
+                            <p className="text-xs">No available units match this filter</p>
+                          </div>
+                        ) : (
+                          <table className="w-full text-xs">
+                            <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+                              <tr>
+                                <th className="text-left px-3 py-2 font-semibold text-slate-500">Unit ID</th>
+                                <th className="text-left px-3 py-2 font-semibold text-slate-500">Type</th>
+                                <th className="text-left px-3 py-2 font-semibold text-slate-500">Component</th>
+                                <th className="text-left px-3 py-2 font-semibold text-slate-500">Vol.</th>
+                                <th className="text-left px-3 py-2 font-semibold text-slate-500">Expires</th>
+                                <th></th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {availableUnits.map(unit => {
+                                const inCart = cartIds.includes(unit.unit_id);
+                                return (
+                                  <tr key={unit.unit_id} className={`transition-colors ${inCart ? 'bg-green-50' : 'hover:bg-slate-50'}`}>
+                                    <td className="px-3 py-2 font-mono text-slate-700">{unit.unitId}</td>
+                                    <td className="px-3 py-2">
+                                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">{unit.bloodType}</span>
+                                    </td>
+                                    <td className="px-3 py-2 text-slate-600">{unit.component}</td>
+                                    <td className="px-3 py-2 text-slate-500">{unit.volumeCC} mL</td>
+                                    <td className="px-3 py-2 text-slate-500">{unit.expirationDate}</td>
+                                    <td className="px-3 py-2">
+                                      <button onClick={() => handleAddToWiCart(unit)} disabled={inCart}
+                                        className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${inCart ? 'bg-green-100 text-green-600 cursor-default' : 'bg-slate-900 text-white hover:bg-slate-700'}`}>
+                                        {inCart ? 'Added' : 'Add'}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400">{availableUnits.length} unit(s) available with current filter</p>
+                    </div>
+
+                    {/* ── Cart + Submit ── */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4 flex flex-col">
+                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Selected Units ({wiCart.length})</h4>
+                      <div className="flex-1 overflow-auto max-h-64">
+                        {wiCart.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2">
+                            <p className="text-xs">No units added yet.</p>
+                            <p className="text-[10px]">Click "Add" on a unit from the table.</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {wiCart.map(unit => (
+                              <div key={unit.unit_id} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 border border-slate-200">
+                                <div>
+                                  <p className="text-xs font-mono font-bold text-slate-800">{unit.unitId}</p>
+                                  <p className="text-[10px] text-slate-500">{unit.component} · {unit.bloodType} · {unit.volumeCC} mL</p>
+                                </div>
+                                <button onClick={() => setConfirmState({
+                                  isOpen: true, title: 'Remove Unit?',
+                                  message: `Remove ${unit.unitId} from cart?`,
+                                  confirmText: 'Remove', variant: 'danger',
+                                  onConfirm: () => { closeConfirm(); handleRemoveWiCart(unit.unit_id); },
+                                })} className="text-slate-400 hover:text-red-600 transition-colors">
+                                  <XCircle className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="border-t border-slate-100 pt-4 mt-auto">
+                        <button
+                          onClick={() => {
+                            if (!wiForm.patientName.trim()) return alert('Patient name is required.');
+                            if (wiCart.length === 0) return alert('Add at least one blood unit to the cart.');
+                            setConfirmState({
+                              isOpen: true,
+                              title: 'Issue Blood to Walk-in Patient?',
+                              message: `Issue ${wiCart.length} unit(s) to ${wiForm.patientName}? This will permanently deduct them from inventory.`,
+                              confirmText: 'Issue Blood',
+                              variant: 'warning',
+                              onConfirm: () => { closeConfirm(); handleWiSubmit(); },
+                            });
+                          }}
+                          disabled={wiSubmitting || wiCart.length === 0}
+                          className="w-full py-2.5 text-sm font-bold rounded-xl bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-40 shadow-sm"
+                        >
+                          {wiSubmitting ? 'Processing…' : `Issue ${wiCart.length} Unit${wiCart.length !== 1 ? 's' : ''}`}
+                        </button>
+                        <p className="text-[10px] text-slate-400 text-center mt-2">All selected units will be marked as Issued</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* ── Walk-in Log ── */
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    {(walkinIssuances || []).length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
+                        <UserPlus className="w-10 h-10" />
+                        <p className="text-sm font-medium">No walk-in issuances recorded yet</p>
+                      </div>
+                    ) : (
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 border-b border-slate-200">
+                          <tr>
+                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Patient</th>
+                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Age/Gender</th>
+                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Purpose</th>
+                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Diagnosis</th>
+                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Units</th>
+                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Issued By</th>
+                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Date</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {(walkinIssuances || []).map(rec => (
+                            <tr key={rec.walkinIssuanceId} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-4 py-3 font-semibold text-slate-800">{rec.patientName}</td>
+                              <td className="px-4 py-3 text-slate-500">{rec.patientAge ? `${rec.patientAge}y` : '—'} / {rec.patientGender || '—'}</td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                  rec.purpose === 'Emergency' ? 'bg-red-50 text-red-700 border-red-200' :
+                                  rec.purpose === 'Surgery'   ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                  rec.purpose === 'Elective'  ? 'bg-slate-100 text-slate-600 border-slate-200' :
+                                  'bg-purple-50 text-purple-700 border-purple-200'
+                                }`}>{rec.purpose}</span>
+                              </td>
+                              <td className="px-4 py-3 text-slate-500 max-w-[140px] truncate">{rec.diagnosis || '—'}</td>
+                              <td className="px-4 py-3">
+                                <div className="flex flex-wrap gap-1">
+                                  {(rec.units || []).map((u, i) => (
+                                    <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-mono">{u.unitId || u.unit_id}</span>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-500">{rec.issuedBy}</td>
+                              <td className="px-4 py-3 text-slate-500">{rec.issuanceDate}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {isIssuanceStaff && activeTab === 'stock_verification' && (
             <div className="space-y-6 animate-in fade-in duration-200">
@@ -1997,7 +2290,7 @@ export default function IssuanceDashboard() {
                       {!isOverview && (
                         <button onClick={() => { setFcHospital('ALL'); setFcBloodType('ALL'); setFcComponent('ALL'); }}
                           className="text-xs font-bold text-slate-500 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition cursor-pointer">
-                          ↩ Reset to Overview
+                           Reset to Overview
                         </button>
                       )}
                       <button

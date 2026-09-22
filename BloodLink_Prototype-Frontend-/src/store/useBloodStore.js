@@ -9,7 +9,7 @@ import { apiCreateLabResult, apiGetLabResults, apiGetDonationBySerial } from '..
 import { apiGetRecalls, apiCreateRecall, apiCreateBulkRecalls } from '../services/api';
 import { apiGetBloodRequests, apiCreateBloodRequest, apiUpdateBloodRequestStatus } from '../services/api';
 import { apiGetBloodIssuances, apiCreateBloodIssuance, apiApproveBloodRelease } from '../services/api';
-import { apiGetBloodInventory, apiCreateBloodInventory, apiVerifyBloodInventory } from '../services/api';
+import { apiGetBloodInventory, apiCreateBloodInventory, apiVerifyBloodInventory, apiGetWalkinIssuances, apiCreateWalkinIssuance } from '../services/api';
 
 const initialDonors = [
   // ── Sample Dataset: Donor Registrationssss ──
@@ -446,6 +446,7 @@ export const useBloodStore = create(
       donations: initialDonations,
       labTestResults: initialLabTestResults,
       bloodInventory: initialBloodInventory,
+      walkinIssuances: [],
       recommendations: initialRecommendations,
       auditLogs: initialAuditLogs,
       donorRecalls: initialDonorRecalls,
@@ -1636,6 +1637,29 @@ export const useBloodStore = create(
         try {
           const data = await apiGetBloodInventory();
           if (data.bloodInventory) set({ bloodInventory: data.bloodInventory });
+        } catch (_) { /* non-critical */ }
+      },
+
+      // ── Walk-in / Direct Issuance ─────────────────────────────────
+      fetchWalkinIssuances: async () => {
+        try {
+          const data = await apiGetWalkinIssuances();
+          if (data?.data) set({ walkinIssuances: data.data });
+        } catch (_) { /* non-critical */ }
+      },
+
+      createWalkinIssuance: async (payload) => {
+        await apiCreateWalkinIssuance(payload);
+        // Refresh both inventory and walkin log
+        try {
+          const [invData, wiData] = await Promise.all([
+            apiGetBloodInventory(),
+            apiGetWalkinIssuances(),
+          ]);
+          const patch = {};
+          if (invData?.bloodInventory) patch.bloodInventory = invData.bloodInventory;
+          if (wiData?.data)            patch.walkinIssuances = wiData.data;
+          set(patch);
         } catch (_) { /* non-critical */ }
       },
 

@@ -320,3 +320,15 @@ export async function apiVerifyBloodInventory(id, action, rejectionReason = null
     body: JSON.stringify({ action, rejection_reason: rejectionReason }),
   });
 }
+
+// ── Walk-in / Direct Issuance ─────────────────────────────────────────────
+export async function apiGetWalkinIssuances() {
+  return request('/walkin-issuances');
+}
+
+export async function apiCreateWalkinIssuance(payload) {
+  return request('/walkin-issuances', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
