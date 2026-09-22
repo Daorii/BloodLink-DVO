@@ -36,7 +36,10 @@ class WalkinIssuanceController extends Controller
                 'status'             => $rec->status,
                 'remarks'            => $rec->remarks,
                 'units'              => $rec->items->map(fn($item) => [
-                    'unitId'         => $item->bloodUnit?->unit_id,
+                    'unitId'         => $item->bloodUnit
+                                          ? 'INV-' . str_pad((string) $item->bloodUnit->unit_id, 4, '0', STR_PAD_LEFT)
+                                          : null,
+                    'unitCode'       => $item->bloodUnit?->unit_code,
                     'bloodType'      => $item->bloodUnit?->blood_type,
                     'component'      => $item->bloodUnit?->component,
                     'volumeCC'       => $item->bloodUnit?->volume_cc,

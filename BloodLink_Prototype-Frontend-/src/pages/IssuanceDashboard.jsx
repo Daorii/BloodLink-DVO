@@ -130,6 +130,7 @@ export default function IssuanceDashboard() {
     fetchBloodIssuancesFromAPI();
     fetchDonationsFromAPI();
     fetchBloodInventoryFromAPI();
+    fetchWalkinIssuances();
     if (role === 'Issuance Personnel' && (!granularForecasts || granularForecasts.length === 0)) {
       generateGranularForecast(4);
     }
@@ -182,6 +183,7 @@ export default function IssuanceDashboard() {
   const [wiCart,            setWiCart]            = useState([]);
   const [wiSubmitting,      setWiSubmitting]      = useState(false);
   const [wiView,            setWiView]            = useState('form'); // 'form' | 'log'
+  const [wiLogPage,         setWiLogPage]         = useState(1);
   const [confirmState,      setConfirmState]      = useState({ isOpen: false, title: '', message: '', confirmText: 'Confirm', variant: 'default', onConfirm: null });
   const closeConfirm = () => setConfirmState(s => ({ ...s, isOpen: false, onConfirm: null }));
   const [verifyLoading,     setVerifyLoading]     = useState(false);
@@ -1127,52 +1129,65 @@ export default function IssuanceDashboard() {
                   </div>
                 ) : (
                   /* ── Walk-in Log ── */
-                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                    {(walkinIssuances || []).length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
-                        <UserPlus className="w-10 h-10" />
-                        <p className="text-sm font-medium">No walk-in issuances recorded yet</p>
-                      </div>
-                    ) : (
-                      <table className="w-full text-xs">
-                        <thead className="bg-slate-50 border-b border-slate-200">
-                          <tr>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Patient</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Age/Gender</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Purpose</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Diagnosis</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Units</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Issued By</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Date</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {(walkinIssuances || []).map(rec => (
-                            <tr key={rec.walkinIssuanceId} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-4 py-3 font-semibold text-slate-800">{rec.patientName}</td>
-                              <td className="px-4 py-3 text-slate-500">{rec.patientAge ? `${rec.patientAge}y` : '—'} / {rec.patientGender || '—'}</td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                  rec.purpose === 'Emergency' ? 'bg-red-50 text-red-700 border-red-200' :
-                                  rec.purpose === 'Surgery'   ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                  rec.purpose === 'Elective'  ? 'bg-slate-100 text-slate-600 border-slate-200' :
-                                  'bg-purple-50 text-purple-700 border-purple-200'
-                                }`}>{rec.purpose}</span>
-                              </td>
-                              <td className="px-4 py-3 text-slate-500 max-w-[140px] truncate">{rec.diagnosis || '—'}</td>
-                              <td className="px-4 py-3">
-                                <div className="flex flex-wrap gap-1">
-                                  {(rec.units || []).map((u, i) => (
-                                    <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-mono">{u.unitId || u.unit_id}</span>
-                                  ))}
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 text-slate-500">{rec.issuedBy}</td>
-                              <td className="px-4 py-3 text-slate-500">{rec.issuanceDate}</td>
+                  <div className="space-y-3">
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                      {(walkinIssuances || []).length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
+                          <UserPlus className="w-10 h-10" />
+                          <p className="text-sm font-medium">No walk-in issuances recorded yet</p>
+                        </div>
+                      ) : (
+                        <table className="w-full text-xs">
+                          <thead className="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Patient</th>
+                              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Age/Gender</th>
+                              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Purpose</th>
+                              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Diagnosis</th>
+                              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Units</th>
+                              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Issued By</th>
+                              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Date</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {(walkinIssuances || [])
+                              .slice((wiLogPage - 1) * PAGE_SIZE, wiLogPage * PAGE_SIZE)
+                              .map(rec => (
+                              <tr key={rec.walkinIssuanceId} className="hover:bg-slate-50 transition-colors">
+                                <td className="px-4 py-3 font-semibold text-slate-800">{rec.patientName}</td>
+                                <td className="px-4 py-3 text-slate-500">{rec.patientAge ? `${rec.patientAge}y` : '—'} / {rec.patientGender || '—'}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                    rec.purpose === 'Emergency' ? 'bg-red-50 text-red-700 border-red-200' :
+                                    rec.purpose === 'Surgery'   ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                    rec.purpose === 'Elective'  ? 'bg-slate-100 text-slate-600 border-slate-200' :
+                                    'bg-purple-50 text-purple-700 border-purple-200'
+                                  }`}>{rec.purpose}</span>
+                                </td>
+                                <td className="px-4 py-3 text-slate-500 max-w-[140px] truncate">{rec.diagnosis || '—'}</td>
+                                <td className="px-4 py-3">
+                                  <div className="flex flex-wrap gap-1">
+                                    {(rec.units || []).map((u, i) => (
+                                      <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-mono">{u.unitId || u.unit_id}</span>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-slate-500">{rec.issuedBy}</td>
+                                <td className="px-4 py-3 text-slate-500">{rec.issuanceDate}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                    {(walkinIssuances || []).length > PAGE_SIZE && (
+                      <TablePagination
+                        total={(walkinIssuances || []).length}
+                        page={wiLogPage}
+                        pageSize={PAGE_SIZE}
+                        onPageChange={setWiLogPage}
+                        label="walk-in issuances"
+                      />
                     )}
                   </div>
                 )}
@@ -1861,6 +1876,9 @@ export default function IssuanceDashboard() {
               ['Verified', 'Pending Review', 'Approved', 'Partially Fulfilled'].includes(r.status)
             );
 
+            // Urgency multipliers for equity-weighted allocation
+            const URGENCY_MULTIPLIER = { 'Emergency': 1.5, 'Urgent': 1.25, 'Routine': 1.0 };
+
             const handleComputeEquity = () => {
               // Ensure forecast exists — generate if empty
               if (!granularForecasts || granularForecasts.length === 0) {
@@ -1895,35 +1913,60 @@ export default function IssuanceDashboard() {
                 };
               });
 
+              const itemMatcher = it => {
+                const bt   = it.bloodType  ?? it.blood_type   ?? '';
+                const comp = it.component  ?? it.bloodComponent ?? '';
+                return bt === distBT && comp === distComp;
+              };
+
               // For hospitals with no forecast entry, default to 0
               const allHospitals = hospitals || [];
+
+              // Determine highest urgency level per hospital (from active requests)
+              const hospitalUrgencyMap = {};
+              activeReqs.forEach(req => {
+                const reqHospId = req.hospitalId ?? req.hospital_id ?? '';
+                if ((req.items || []).some(itemMatcher)) {
+                  const lvl = req.urgencyLevel ?? req.urgency_level ?? 'Routine';
+                  const prev = hospitalUrgencyMap[reqHospId];
+                  // Keep highest urgency: Emergency > Urgent > Routine
+                  if (!prev ||
+                      (lvl === 'Emergency') ||
+                      (lvl === 'Urgent' && prev === 'Routine')) {
+                    hospitalUrgencyMap[reqHospId] = lvl;
+                  }
+                }
+              });
+
               const rows = allHospitals.map(h => ({
                 hospitalId:   h.id,
                 hospitalName: h.name,
                 hospitalType: h.type,
                 predicted:    forecastMap[h.id]?.predicted ?? 0,
+                urgencyLevel: hospitalUrgencyMap[h.id] ?? null,
               }));
 
-              const totalForecast = rows.reduce((s, r) => s + r.predicted, 0);
+              // Step 1: compute adjusted weights (forecast × urgency multiplier)
+              const rowsWithAdj = rows.map(r => {
+                const multiplier = r.urgencyLevel ? (URGENCY_MULTIPLIER[r.urgencyLevel] ?? 1.0) : 1.0;
+                const adjusted   = r.predicted * multiplier;
+                return { ...r, multiplier, adjusted };
+              });
 
-              // Compute equity allocation
-              const results = rows.map(r => {
-                const weight     = totalForecast > 0 ? r.predicted / totalForecast : 1 / rows.length;
+              const totalForecast = rows.reduce((s, r) => s + r.predicted, 0);
+              const totalAdjusted = rowsWithAdj.reduce((s, r) => s + r.adjusted, 0);
+
+              // Compute equity allocation using adjusted weights
+              const results = rowsWithAdj.map(r => {
+                const weight     = totalAdjusted > 0 ? r.adjusted / totalAdjusted : 1 / rows.length;
                 const allocation = Math.round(weight * available);
 
-                // Find ALL active requests from this hospital that contain the selected BT+Component
-                const itemMatcher = it => {
-                  const bt   = it.bloodType  ?? it.blood_type   ?? '';
-                  const comp = it.component  ?? it.bloodComponent ?? '';
-                  return bt === distBT && comp === distComp;
-                };
                 const matchingReqs = activeReqs.filter(req => {
                   const reqHospId = req.hospitalId ?? req.hospital_id ?? '';
                   return reqHospId === r.hospitalId && (req.items || []).some(itemMatcher);
                 });
 
                 const hasRequest = matchingReqs.length > 0;
-                // Sum requested units across all matching requests for this hospital + BT + component
                 const reqUnits = matchingReqs.reduce((sum, req) => {
                   const item = (req.items || []).find(itemMatcher);
                   return sum + (item?.units ?? 0);
@@ -1943,7 +1986,13 @@ export default function IssuanceDashboard() {
               });
 
               const key = `${distBT}|${distComp}`;
-              setEquityResult(key, results, { totalInventory, reserve, available, totalForecast });
+              const computedAt = new Date().toLocaleString('en-PH', {
+                dateStyle: 'medium', timeStyle: 'short'
+              });
+              setEquityResult(key, results, {
+                totalInventory, reserve, available,
+                totalForecast, totalAdjusted, computedAt,
+              });
             };
 
             // Derive display state from the Zustand store for the currently selected BT+Comp
@@ -2009,12 +2058,13 @@ export default function IssuanceDashboard() {
                 {distComputed && distMeta && (
                   <>
                     {/* Summary cards */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                       {[
                         { label: 'Total Inventory', value: distMeta.totalInventory, sub: `${distBT} ${distComp} available`, color: 'indigo' },
                         { label: 'Emergency Reserve', value: distMeta.reserve, sub: 'Units set aside', color: 'amber' },
                         { label: 'Distributable Units', value: distMeta.available, sub: 'After reserve deduction', color: 'emerald' },
-                        { label: 'Total Forecast Demand', value: distMeta.totalForecast, sub: 'Across all hospitals (MLR Week 9)', color: 'blue' },
+                        { label: 'Total Forecast Demand', value: distMeta.totalForecast, sub: 'Across all hospitals (nearest MLR week)', color: 'blue' },
+                        { label: 'Computed At', value: distMeta.computedAt?.split(',')[1]?.trim() ?? '—', sub: distMeta.computedAt?.split(',')[0] ?? '', color: 'slate' },
                       ].map(card => (
                         <div key={card.label} className={`bg-white border border-slate-200 rounded-xl p-4 shadow-sm`}>
                           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">{card.label}</p>
@@ -2046,6 +2096,8 @@ export default function IssuanceDashboard() {
                               <th className="px-5 py-3">Hospital</th>
                               <th className="px-5 py-3 text-center">Type</th>
                               <th className="px-5 py-3 text-center">MLR Forecast</th>
+                              <th className="px-5 py-3 text-center">Urgency</th>
+                              <th className="px-5 py-3 text-center">Adj. Weight</th>
                               <th className="px-5 py-3 text-center">Equity Share</th>
                               <th className="px-5 py-3 text-center">Recommended Allocation</th>
                               <th className="px-5 py-3 text-center">Active Request</th>
@@ -2073,6 +2125,20 @@ export default function IssuanceDashboard() {
                                   }`}>{row.hospitalType}</span>
                                 </td>
                                 <td className="px-5 py-3.5 text-center font-bold text-slate-700">{row.predicted}</td>
+                                <td className="px-5 py-3.5 text-center">
+                                  {row.urgencyLevel ? (
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                      row.urgencyLevel === 'Emergency' ? 'bg-red-50 border-red-200 text-red-700' :
+                                      row.urgencyLevel === 'Urgent'    ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                                      'bg-slate-50 border-slate-200 text-slate-600'
+                                    }`}>{row.urgencyLevel} ×{row.multiplier}</span>
+                                  ) : (
+                                    <span className="text-slate-300 text-[10px] font-semibold">Routine ×1.0</span>
+                                  )}
+                                </td>
+                                <td className="px-5 py-3.5 text-center font-mono text-slate-600 text-[11px]">
+                                  {row.adjusted?.toFixed(1) ?? row.predicted}
+                                </td>
                                 <td className="px-5 py-3.5 text-center">
                                   <div className="flex flex-col items-center gap-1">
                                     <span className="font-bold text-slate-800">{row.weight}%</span>
@@ -2102,7 +2168,7 @@ export default function IssuanceDashboard() {
                           </tbody>
                           <tfoot>
                             <tr className="bg-slate-50 border-t border-slate-200 font-bold text-slate-700">
-                              <td className="px-5 py-3" colSpan={2}>Totals</td>
+                              <td className="px-5 py-3" colSpan={4}>Totals</td>
                               <td className="px-5 py-3 text-center">{distMeta.totalForecast}</td>
                               <td className="px-5 py-3 text-center">100%</td>
                               <td className="px-5 py-3 text-center">{distMeta.available} units</td>
@@ -2125,12 +2191,25 @@ export default function IssuanceDashboard() {
                           <p className="text-indigo-700 font-bold">AvailableBlood = {distMeta.totalInventory} &minus; {distMeta.reserve} = <strong>{distMeta.available} units</strong></p>
                         </div>
                         <div className="bg-slate-50 rounded-lg p-3 font-mono text-[11px] space-y-1">
-                          <p className="text-slate-400 font-sans font-semibold mb-2">Step 2 — Proportional Allocation per Hospital:</p>
-                          <p>Allocation<sub>h</sub> = (ForecastedDemand<sub>h</sub> / TotalForecast) &times; AvailableBlood</p>
+                          <p className="text-slate-400 font-sans font-semibold mb-2">Step 2 — Urgency Adjustment per Hospital:</p>
+                          <p>AdjustedWeight<sub>h</sub> = ForecastedDemand<sub>h</sub> &times; UrgencyMultiplier<sub>h</sub></p>
+                          <p className="text-[10px] text-slate-400 font-sans">Multipliers: Emergency = 1.5 &nbsp;|&nbsp; Urgent = 1.25 &nbsp;|&nbsp; Routine = 1.0</p>
                           <div className="mt-2 space-y-1">
                             {distResults.map(row => (
                               <p key={row.hospitalId} className="text-indigo-700">
-                                {row.hospitalName.split(' ')[0]}: ({row.predicted} / {distMeta.totalForecast}) &times; {distMeta.available} = <strong>{row.allocation}</strong>
+                                {row.hospitalName.split(' ')[0]}: {row.predicted} &times; {row.multiplier ?? 1.0} = <strong>{row.adjusted?.toFixed(1) ?? row.predicted}</strong>
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="bg-slate-50 rounded-lg p-3 font-mono text-[11px] space-y-1">
+                          <p className="text-slate-400 font-sans font-semibold mb-2">Step 3 — Proportional Allocation per Hospital:</p>
+                          <p>Allocation<sub>h</sub> = (AdjustedWeight<sub>h</sub> / &Sigma;AdjustedWeights) &times; AvailableBlood</p>
+                          <p className="text-[10px] text-slate-400 font-sans">&Sigma;AdjustedWeights = {distMeta.totalAdjusted?.toFixed(1) ?? distMeta.totalForecast}</p>
+                          <div className="mt-2 space-y-1">
+                            {distResults.map(row => (
+                              <p key={row.hospitalId} className="text-indigo-700">
+                                {row.hospitalName.split(' ')[0]}: ({row.adjusted?.toFixed(1) ?? row.predicted} / {distMeta.totalAdjusted?.toFixed(1) ?? distMeta.totalForecast}) &times; {distMeta.available} = <strong>{row.allocation}</strong>
                               </p>
                             ))}
                           </div>
@@ -2138,7 +2217,9 @@ export default function IssuanceDashboard() {
                         <p className="text-[10px] text-slate-400 italic">
                           Forecasted demand is generated by the Multiple Linear Regression model using historical blood issuance records.
                           Emergency reserve of {distMeta.reserve} unit(s) is preserved before distribution.
+                          Urgency multipliers prioritize hospitals with active Emergency or Urgent requests.
                           All recommendations are subject to final approval by authorized SNBC-Mindanao personnel.
+                          Computed: {distMeta.computedAt ?? '—'}
                         </p>
                       </div>
                     </div>
