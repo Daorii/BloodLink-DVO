@@ -107,11 +107,14 @@ class DonorRecallController extends Controller
     {
         $v = $request->validate([
             'donor_id'      => 'required|integer|exists:donors,donor_id',
-            'recall_reason' => 'nullable|string|max:100',
+            'recall_reason' => 'nullable|string|max:200',
+            'sms_message'   => 'nullable|string|max:160',
         ]);
 
         $donor   = Donor::findOrFail($v['donor_id']);
-        $message = $this->buildMessage($donor);
+        $message = $v['sms_message'] ?? $this->buildMessage($donor);
+        // Replace [Donor] placeholder with actual first name
+        $message = str_replace('[Donor]', $donor->first_name ?? 'Donor', $message);
         $sent    = $this->sendSMS($donor->contact_number ?? '', $message);
 
         $recall = DonorRecall::create([
@@ -141,18 +144,21 @@ class DonorRecallController extends Controller
         $v = $request->validate([
             'donor_ids'     => 'required|array|min:1',
             'donor_ids.*'   => 'integer|exists:donors,donor_id',
-            'recall_reason' => 'nullable|string|max:100',
+            'recall_reason' => 'nullable|string|max:200',
+            'sms_message'   => 'nullable|string|max:160',
         ]);
 
-        $today     = now()->toDateString();
-        $userId    = $request->user()?->user_id;
-        $reason    = $v['recall_reason'] ?? 'Critical Shortage Match';
-        $created   = [];
-        $sentCount = 0;
+        $today      = now()->toDateString();
+        $userId     = $request->user()?->user_id;
+        $reason     = $v['recall_reason'] ?? 'Critical Shortage Match';
+        $created    = [];
+        $sentCount  = 0;
 
         foreach ($v['donor_ids'] as $donorId) {
             $donor   = Donor::findOrFail($donorId);
-            $message = $this->buildMessage($donor);
+            $message = $v['sms_message'] ?? $this->buildMessage($donor);
+            // Replace [Donor] placeholder with actual first name for personalization
+            $message = str_replace('[Donor]', $donor->first_name ?? 'Donor', $message);
             $sent    = $this->sendSMS($donor->contact_number ?? '', $message);
 
             $recall = DonorRecall::create([

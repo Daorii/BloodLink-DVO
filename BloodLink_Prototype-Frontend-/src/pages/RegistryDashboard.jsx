@@ -41,7 +41,7 @@ const ITEMS_PER_PAGE = 5;
 const DEFAULT_HEALTH = [true, true, true, true, true];
 
 export default function RegistryDashboard() {
-  const { donors, inventory, bloodInventory, addDonor, updateDonor, updateDonorMedical, donationEvents, authSystemUser, labTestResults, donations, recalls, addLabTestResult, recordDonation, isSidebarCollapsed, toggleSidebar, fetchDonorsFromAPI, fetchDonationEventsFromAPI, fetchDonationsFromAPI, fetchLabResultsFromAPI, fetchRecallsFromAPI, fetchBloodInventoryFromAPI, dispatchRecallSMS, dispatchBulkRecallSMS } = useBloodStore();
+  const { donors, inventory, bloodInventory, addDonor, updateDonor, updateDonorMedical, donationEvents, authSystemUser, labTestResults, donations, recalls, addLabTestResult, recordDonation, isSidebarCollapsed, toggleSidebar, fetchDonorsFromAPI, fetchDonationEventsFromAPI, fetchDonationsFromAPI, fetchLabResultsFromAPI, fetchRecallsFromAPI, fetchBloodInventoryFromAPI, dispatchRecallSMS, dispatchBulkRecallSMS, updateRecallResponse } = useBloodStore();
 
   // Dynamically prepare donor lastDonation dates relative to today's date for demo purposes
   const preparedDonors = useMemo(() => {
@@ -64,6 +64,15 @@ export default function RegistryDashboard() {
   // Recall tab search/filter
   const [recallSearch, setRecallSearch] = useState('');
   const [recallBloodFilter, setRecallBloodFilter] = useState('All');
+  const [recallStatusFilter, setRecallStatusFilter] = useState('All'); // All | Eligible Now | Eligible Soon | Not Yet
+  const [recallDonationFilter, setRecallDonationFilter] = useState('All'); // All | Regular (4+) | Occasional
+  // Dispatch modal state
+  const [recallDispatchModal, setRecallDispatchModal] = useState({ isOpen: false, donorId: '', donorName: '', isBulk: false });
+  const [recallReason, setRecallReason] = useState('Critical Shortage Match');
+  const [recallMessage, setRecallMessage] = useState('');
+  // Mark Response modal
+  const [markResponseModal, setMarkResponseModal] = useState({ isOpen: false, recallId: null, current: '' });
+
 
   // Pagination states
   const [registryPage, setRegistryPage] = useState(1);
@@ -361,24 +370,51 @@ export default function RegistryDashboard() {
   }, [bloodInventory]);
 
   const recallDonors = useMemo(() => {
-    // Show all eligible donors when no specific critical type is detected,
-    // otherwise filter to donors whose blood type matches a critical type
-    const eligible = preparedDonors.filter(d => d.lastDonation && d.status !== 'Deferred');
-    if (criticalBloodTypes.length === 0) return eligible;
-    return eligible.filter(d => criticalBloodTypes.includes(d.bloodType));
-  }, [preparedDonors, criticalBloodTypes]);
+    // Show all eligible donors (have lastDonation + not Deferred)
+    // criticalBloodTypes is used only for visual badges, not to filter here
+    return preparedDonors.filter(d =>
+      d.lastDonation && d.lastDonation !== '' && d.status !== 'Deferred'
+    );
+  }, [preparedDonors]);
 
-  // Filtered recall donors (search + blood type filter)
+  // Filtered recall donors (search + filters + sorted)
   const filteredRecallDonors = useMemo(() => {
-    return recallDonors.filter(d => {
+    const today = new Date();
+    const withDays = recallDonors.map(d => {
+      const daysSince = d.lastDonation
+        ? Math.floor((today - new Date(d.lastDonation)) / (1000 * 60 * 60 * 24))
+        : -1;
+      const daysLeft = daysSince >= 0 ? Math.max(0, 90 - daysSince) : 999;
+      const eligible = daysSince >= 90;
+      const soon = !eligible && daysLeft <= 5 && daysSince >= 0;
+      return { ...d, daysSince, daysLeft, eligible, soon };
+    });
+
+    return withDays.filter(d => {
       const matchesSearch =
         d.name.toLowerCase().includes(recallSearch.toLowerCase()) ||
         d.id.toLowerCase().includes(recallSearch.toLowerCase()) ||
         d.bloodType.toLowerCase().includes(recallSearch.toLowerCase());
       const matchesBlood = recallBloodFilter === 'All' || d.bloodType === recallBloodFilter;
-      return matchesSearch && matchesBlood;
+      const matchesStatus =
+        recallStatusFilter === 'All' ? true :
+        recallStatusFilter === 'Eligible Now'  ? d.eligible :
+        recallStatusFilter === 'Eligible Soon' ? d.soon :
+        !d.eligible && !d.soon;
+      const donationCount = d.donationCount ?? d.totalDonations ?? 0;
+      const matchesDonation =
+        recallDonationFilter === 'All' ? true :
+        recallDonationFilter === 'Regular (4+)' ? donationCount >= 4 :
+        donationCount < 4;
+      return matchesSearch && matchesBlood && matchesStatus && matchesDonation;
+    }).sort((a, b) => {
+      // Eligible Soon (0-5 days left) first, then Eligible Now, then rest by days left asc
+      const aPriority = a.soon ? 0 : a.eligible ? 1 : 2;
+      const bPriority = b.soon ? 0 : b.eligible ? 1 : 2;
+      if (aPriority !== bPriority) return aPriority - bPriority;
+      return a.daysLeft - b.daysLeft;
     });
-  }, [recallDonors, recallSearch, recallBloodFilter]);
+  }, [recallDonors, recallSearch, recallBloodFilter, recallStatusFilter, recallDonationFilter]);
 
   // Paginated Recall Donors
   const paginatedRecallDonors = useMemo(() => {
@@ -389,26 +425,27 @@ export default function RegistryDashboard() {
   const totalRecallPages = Math.max(1, Math.ceil(filteredRecallDonors.length / ITEMS_PER_PAGE));
   const paginatedRecalls = (recalls || []).slice((recallHistoryPage - 1) * ITEMS_PER_PAGE, recallHistoryPage * ITEMS_PER_PAGE);
 
-  // Individual SMS Recall
+  // Individual SMS Recall — open rich dispatch modal
   const handleRecall = (id) => {
     const donorObj = preparedDonors.find(d => d.id === id);
-    setRecallConfirm({
-      isOpen: true,
-      donorId: id,
-      donorName: donorObj?.name || id,
-      isBulk: false
-    });
+    const bt = donorObj?.bloodType ?? '';
+    setRecallReason('Critical Shortage Match');
+    setRecallMessage(
+      `Hi ${donorObj?.name?.split(' ')[0] ?? 'Donor'}, BloodLink SNBC-DVO: you are eligible to donate again. ` +
+      `Your blood type ${bt} is currently needed. Please visit the SPMC Blood Bank at your earliest convenience. Thank you!`
+    );
+    setRecallDispatchModal({ isOpen: true, donorId: id, donorName: donorObj?.name || id, isBulk: false });
   };
 
-  // Bulk SMS Recall
+  // Bulk SMS Recall — open rich dispatch modal
   const handleBulkRecall = () => {
     if (selectedRecallIds.length === 0) return;
-    setRecallConfirm({
-      isOpen: true,
-      donorId: '',
-      donorName: `${selectedRecallIds.length} Donors`,
-      isBulk: true
-    });
+    setRecallReason('Critical Shortage Match');
+    setRecallMessage(
+      `Hi [Donor], BloodLink SNBC-DVO: you are eligible to donate again and your blood type is urgently needed. ` +
+      `Please visit the SPMC Blood Bank at your earliest convenience. Thank you!`
+    );
+    setRecallDispatchModal({ isOpen: true, donorId: '', donorName: `${selectedRecallIds.length} Donors`, isBulk: true });
   };
 
   const handleSelectAll = (e) => {
@@ -567,14 +604,7 @@ export default function RegistryDashboard() {
           </div>
 
           <div className="flex items-center gap-3">
-            {tab === 'registry' && (
-              <button
-                onClick={() => setShowDrawer(true)}
-                className="bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" /> Register Donor
-              </button>
-            )}
+
             <div className="text-right">
               <p className="text-xs font-bold text-slate-900">Registrar Desk</p>
               <p className="text-[10px] text-slate-400">Bajada HQ, Davao City</p>
@@ -590,24 +620,32 @@ export default function RegistryDashboard() {
           {/*  -  -  - Ã‚  -  -  -  - Ã‚  -  TAB 1: DONOR REGISTRY  -  -  - Ã‚  -  -  -  - Ã‚  -  */}
           {tab === 'registry' && (
             <div className="space-y-5 print:hidden">
-              <div className="flex items-center justify-between">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">Active Donor Profiles</h3>
+                  <h3 className="text-sm font-bold text-slate-900">Active Donor Profiles</h3>
                   <p className="text-xs text-slate-400 mt-0.5">Review eligibility, view medical checklist histories, and print pre-filled DHQ forms.</p>
                 </div>
-                <div className="search">
-                  <input
-                    type="text"
-                    placeholder="Search name, ID, blood type..."
-                    className="search__input text-xs"
-                    value={searchQuery}
-                    onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      setRegistryPage(1);
-                    }}
-                  />
-                  <button className="search__button" type="button">
-                    <Search className="search__icon" />
+                <div className="flex items-center gap-2">
+                  <div className="search">
+                    <input
+                      type="text"
+                      placeholder="Search name, ID, blood type..."
+                      className="search__input text-xs"
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setRegistryPage(1);
+                      }}
+                    />
+                    <button className="search__button" type="button">
+                      <Search className="search__icon" />
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setShowDrawer(true)}
+                    className="bg-slate-900 hover:bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Register Donor
                   </button>
                 </div>
               </div>
@@ -773,30 +811,20 @@ export default function RegistryDashboard() {
           {tab === 'recall' && (
             <div className="space-y-5 print:hidden">
 
-              {/* Shortage Info Banner */}
-              <div className="bg-slate-900 text-white rounded-xl p-5 shadow-sm">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="bg-[#C21C24] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider">Critical Stock</span>
-                  <span className="text-slate-400 text-[10px] font-semibold uppercase tracking-wider">Targeted Shortage Matching</span>
-                </div>
-                <h3 className="text-base font-bold">Automatic Shortage Matching</h3>
-                <p className="text-slate-400 text-xs mt-1 leading-relaxed max-w-2xl">
-                  Donors below have exceeded their 90-day rest interval and match blood types currently flagged as{' '}
-                  <strong className="text-rose-400">CRITICAL</strong> in the network ({criticalBloodTypes.join(', ') || 'None'}).
-                </p>
-              </div>
 
-              {/* call Controls Row */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              {/* Recall Controls Card */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">Eligible Shortage Donors</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {filteredRecallDonors.length} eligible donor{filteredRecallDonors.length !== 1 ? 's' : ''} found
-                  </p>
+                    <h3 className="text-sm font-bold text-slate-900">Recall Candidates</h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {filteredRecallDonors.length} donor{filteredRecallDonors.length !== 1 ? 's' : ''} found · sorted by eligibility
+                    </p>
+                  </div>
                 </div>
 
-                {/* Search + Filter */}
-                <div className="flex items-center gap-2">
+                {/* Search + Filters */}
+                <div className="flex items-center gap-2 flex-wrap">
                   <div className="search">
                     <input
                       type="text"
@@ -823,6 +851,29 @@ export default function RegistryDashboard() {
                       className="border border-slate-200 bg-white rounded-lg py-1.5 pl-2 pr-6 text-xs focus:outline-none focus:ring-1 focus:ring-slate-300 cursor-pointer"
                     >
                       {BLOOD_TYPES.map(bt => <option key={bt} value={bt}>{bt === 'All' ? 'All Blood Types' : bt}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={recallStatusFilter}
+                      onChange={(e) => { setRecallStatusFilter(e.target.value); setRecallPage(1); }}
+                      className="border border-slate-200 bg-white rounded-lg py-1.5 pl-2 pr-6 text-xs focus:outline-none focus:ring-1 focus:ring-slate-300 cursor-pointer"
+                    >
+                      <option value="All">All Statuses</option>
+                      <option value="Eligible Now">Eligible Now</option>
+                      <option value="Eligible Soon">Eligible Soon (≤5 days)</option>
+                      <option value="Not Yet">Not Yet Eligible</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={recallDonationFilter}
+                      onChange={(e) => { setRecallDonationFilter(e.target.value); setRecallPage(1); }}
+                      className="border border-slate-200 bg-white rounded-lg py-1.5 pl-2 pr-6 text-xs focus:outline-none focus:ring-1 focus:ring-slate-300 cursor-pointer"
+                    >
+                      <option value="All">All Donors</option>
+                      <option value="Regular (4+)">Regular (4+ donations)</option>
+                      <option value="Occasional">Occasional (&lt;4 donations)</option>
                     </select>
                   </div>
                 </div>
@@ -1091,13 +1142,32 @@ export default function RegistryDashboard() {
                               </span>
                             </td>
                             <td className="px-5 py-3 text-center">
-                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
-                                r.donorResponse === 'Committed' ? 'text-emerald-700'
-                                : r.donorResponse === 'No Response' ? 'text-slate-400'
-                                : 'text-slate-300'
-                              }`}>
-                                {r.donorResponse ?? 'â€”'}
-                              </span>
+                              <div className="flex flex-col items-center gap-1">
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                                  r.donorResponse === 'Committed'   ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' :
+                                  r.donorResponse === 'Declined'    ? 'bg-rose-50 border border-rose-200 text-rose-700' :
+                                  r.donorResponse === 'No Response' ? 'bg-slate-100 border border-slate-200 text-slate-500' :
+                                  'text-slate-300'
+                                }`}>
+                                  {r.donorResponse ?? '-'}
+                                </span>
+                                <select
+                                  defaultValue=""
+                                  onChange={async (e) => {
+                                    if (!e.target.value) return;
+                                    const val = e.target.value;
+                                    e.target.value = '';
+                                    try { await updateRecallResponse(r.recallId ?? r.recall_id, val); }
+                                    catch { /* silent */ }
+                                  }}
+                                  className="text-[9px] border border-slate-200 rounded px-1 py-0.5 text-slate-500 bg-white cursor-pointer focus:outline-none hover:border-slate-400 transition"
+                                >
+                                  <option value="">Mark…</option>
+                                  <option value="Committed">Committed</option>
+                                  <option value="Declined">Declined</option>
+                                  <option value="No Response">No Response</option>
+                                </select>
+                              </div>
                             </td>
                           </tr>
                         ))
@@ -1243,24 +1313,76 @@ export default function RegistryDashboard() {
         </main>
       </div>
 
-      {/* SMS RECALL CONFIRMATION & SUCCESS MODALS */}
-      <ConfirmationModal
-        isOpen={recallConfirm.isOpen}
-        title={recallConfirm.isBulk ? "Dispatch Bulk Recall?" : "Dispatch Recall SMS?"}
-        message={recallConfirm.isBulk 
-          ? `This will dispatch recall alerts to all ${recallConfirm.donorName} via Semaphore Gateway. Please confirm to proceed.`
-          : `This will dispatch a recall SMS to ${recallConfirm.donorName}. Please confirm to proceed.`}
-        confirmText="Confirm"
-        cancelText="Cancel"
-        variant="warning"
-        onConfirm={async () => {
-          const donorName = recallConfirm.donorName;
-          const isBulk = recallConfirm.isBulk;
-          const donorId = recallConfirm.donorId;
-          setRecallConfirm({ isOpen: false, donorId: '', donorName: '', isBulk: false });
+      {/* ── SMS RECALL DISPATCH MODAL (rich — with editable message + reason) ── */}
+      {recallDispatchModal.isOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+              <div>
+                <p className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-0.5">⚠ Recall Dispatch</p>
+                <h3 className="text-sm font-bold text-slate-900">
+                  {recallDispatchModal.isBulk ? `Bulk Recall — ${recallDispatchModal.donorName}` : `Recall SMS — ${recallDispatchModal.donorName}`}
+                </h3>
+              </div>
+            </div>
+            {/* Body */}
+            <div className="p-6 space-y-4 overflow-y-auto">
+              {/* Reason */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Recall Reason</label>
+                <select
+                  value={recallReason}
+                  onChange={e => setRecallReason(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-300 bg-slate-50"
+                >
+                  <option>Critical Shortage Match</option>
+                  <option>Emergency Hospital Request</option>
+                  <option>Scheduled Mobilization Drive</option>
+                  <option>Rare Blood Type Needed</option>
+                  <option>Routine Recall</option>
+                </select>
+              </div>
+              {/* SMS Message */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">SMS Message</label>
+                  <span className={`text-[10px] font-mono font-bold ${recallMessage.length > 160 ? 'text-red-600' : recallMessage.length > 140 ? 'text-amber-600' : 'text-slate-400'}`}>
+                    {recallMessage.length}/160
+                  </span>
+                </div>
+                <textarea
+                  rows={4}
+                  maxLength={160}
+                  value={recallMessage}
+                  onChange={e => setRecallMessage(e.target.value)}
+                  className="w-full resize-none border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-300 bg-slate-50"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  {recallDispatchModal.isBulk
+                    ? 'This message will be sent to all selected donors. [Donor] will be replaced with their first name for individual sends.'
+                    : 'This is the exact message that will be sent via PhilSMS.'}
+                </p>
+              </div>
+            </div>
+            {/* Footer */}
+            <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4">
+              <button
+                onClick={() => setRecallDispatchModal({ isOpen: false, donorId: '', donorName: '', isBulk: false })}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+          const donorName = recallDispatchModal.donorName;
+          const isBulk = recallDispatchModal.isBulk;
+          const donorId = recallDispatchModal.donorId;
+          const opts = { recallReason, smsMessage: recallMessage };
+          setRecallDispatchModal({ isOpen: false, donorId: '', donorName: '', isBulk: false });
           try {
             if (isBulk) {
-              const result = await dispatchBulkRecallSMS(selectedRecallIds);
+              const result = await dispatchBulkRecallSMS(selectedRecallIds, null, opts);
               setSelectedRecallIds([]);
               if (result.failed > 0) {
                 setNoticeModal({ isOpen: true, title: 'Some SMS Messages Were Not Sent', message: `${result.sent} of ${result.count} recall SMS message(s) were sent. The remaining messages are recorded as failed in the dispatch history.`, variant: 'warning' });
@@ -1268,7 +1390,7 @@ export default function RegistryDashboard() {
                 setRecallSuccess({ isOpen: true, message: `Bulk SMS recall dispatched to ${donorName} via PhilSMS.` });
               }
             } else {
-              const result = await dispatchRecallSMS(donorId);
+              const result = await dispatchRecallSMS(donorId, null, opts);
               if (result.smsSent) {
                 setRecallSuccess({ isOpen: true, message: `Recall SMS dispatched to ${donorName} via PhilSMS.` });
               } else {
@@ -1277,11 +1399,17 @@ export default function RegistryDashboard() {
             }
             fetchRecallsFromAPI(); // refresh history
           } catch {
-            setRecallSuccess({ isOpen: true, message: 'Recall recorded locally. (API error â€” check connection.)' });
+            setRecallSuccess({ isOpen: true, message: 'Recall recorded locally. (API error — check connection.)' });
           }
-        }}
-        onCancel={() => setRecallConfirm({ isOpen: false, donorId: '', donorName: '', isBulk: false })}
-      />
+                }}
+                className="px-4 py-2 text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow transition cursor-pointer"
+              >
+                Dispatch Recall SMS
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editingRegistryDonor && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">

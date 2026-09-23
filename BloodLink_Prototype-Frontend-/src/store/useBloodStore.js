@@ -6,7 +6,7 @@ import { apiGetDonors, apiCreateDonor, apiUpdateDonor, apiDeleteDonor } from '..
 import { apiGetDonationEvents, apiCreateDonationEvent, apiUpdateDonationEvent, apiDeleteDonationEvent } from '../services/api';
 import { apiCreateDonation, apiGetDonations, apiUpdateDonationOutcome } from '../services/api';
 import { apiCreateLabResult, apiGetLabResults, apiGetDonationBySerial } from '../services/api';
-import { apiGetRecalls, apiCreateRecall, apiCreateBulkRecalls } from '../services/api';
+import { apiGetRecalls, apiCreateRecall, apiCreateBulkRecalls, apiUpdateRecallResponse } from '../services/api';
 import { apiGetBloodRequests, apiCreateBloodRequest, apiUpdateBloodRequestStatus } from '../services/api';
 import { apiGetBloodIssuances, apiCreateBloodIssuance, apiApproveBloodRelease } from '../services/api';
 import { apiGetBloodInventory, apiCreateBloodInventory, apiVerifyBloodInventory, apiGetWalkinIssuances, apiCreateWalkinIssuance } from '../services/api';
@@ -1874,12 +1874,13 @@ export const useBloodStore = create(
         }
       },
 
-      dispatchRecallSMS: async (donorId, processedBy = null) => {
+      dispatchRecallSMS: async (donorId, processedBy = null, { recallReason, smsMessage } = {}) => {
         try {
           const numericId = parseInt(String(donorId).replace(/^D0*/i, ''), 10);
           const data = await apiCreateRecall({
-            donor_id: numericId,
-            recall_reason: 'Critical Shortage Match',
+            donor_id:      numericId,
+            recall_reason: recallReason ?? 'Critical Shortage Match',
+            sms_message:   smsMessage   ?? undefined,
           });
           // Prepend to API-backed list
           set((state) => ({ recalls: [data.recall, ...state.recalls] }));
@@ -1901,12 +1902,13 @@ export const useBloodStore = create(
         }
       },
 
-      dispatchBulkRecallSMS: async (donorIds, processedBy = null) => {
+      dispatchBulkRecallSMS: async (donorIds, processedBy = null, { recallReason, smsMessage } = {}) => {
         try {
           const numericIds = donorIds.map(id => parseInt(String(id).replace(/^D0*/i, ''), 10));
           const data = await apiCreateBulkRecalls({
-            donor_ids: numericIds,
-            recall_reason: 'Critical Shortage Match',
+            donor_ids:     numericIds,
+            recall_reason: recallReason ?? 'Critical Shortage Match',
+            sms_message:   smsMessage   ?? undefined,
           });
           if (data.recalls) {
             set((state) => ({ recalls: [...data.recalls, ...state.recalls] }));
@@ -1914,6 +1916,23 @@ export const useBloodStore = create(
           return data;
         } catch (e) {
           console.error('dispatchBulkRecallSMS error:', e);
+          throw e;
+        }
+      },
+
+      updateRecallResponse: async (recallId, donorResponse) => {
+        try {
+          const data = await apiUpdateRecallResponse(recallId, { donor_response: donorResponse });
+          set((state) => ({
+            recalls: state.recalls.map(r =>
+              (r.recallId === recallId || r.recall_id === recallId)
+                ? { ...r, donorResponse }
+                : r
+            ),
+          }));
+          return data;
+        } catch (e) {
+          console.error('updateRecallResponse error:', e);
           throw e;
         }
       },

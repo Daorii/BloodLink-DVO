@@ -272,6 +272,10 @@ export async function apiCreateBulkRecalls(data) {
   return request('/recalls/bulk', { method: 'POST', body: JSON.stringify(data) });
 }
 
+export async function apiUpdateRecallResponse(recallId, data) {
+  return request(`/recalls/${recallId}/response`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
 // ─── Blood Requests endpoints ─────────────────────────────────────────────
 
 export async function apiGetBloodRequests() {

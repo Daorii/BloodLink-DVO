@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { useBloodStore } from '../store/useBloodStore';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, LineChart, Line, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, LineChart, Line, CartesianGrid, ReferenceLine, Legend } from 'recharts';
 import {
   Heart,
   Database,
@@ -168,6 +168,8 @@ export default function AdminDashboard() {
   const approveRecommendation = useBloodStore((state) => state.approveRecommendation);
   const rejectRecommendation = useBloodStore((state) => state.rejectRecommendation);
   const generateRecommendationsFromForecast = useBloodStore((state) => state.generateRecommendationsFromForecast);
+  const equityResultsMap = useBloodStore((state) => state.equityResultsMap) ?? {};
+  const setEquityResult  = useBloodStore((state) => state.setEquityResult);
   const auditLogs = useBloodStore((state) => state.auditLogs);
   const donationEvents = useBloodStore((state) => state.donationEvents);
   const addDonationEvent = useBloodStore((state) => state.addDonationEvent);
@@ -267,6 +269,14 @@ export default function AdminDashboard() {
   const [fcBloodType, setFcBloodType] = useState('ALL');
   const [fcComponent, setFcComponent] = useState('ALL');
   const [fcWeeks, setFcWeeks] = useState(4);
+
+  // ── Missing states required by ported Forecast + Distribution panels ──
+  const [fcLoading, setFcLoading] = useState(false);
+  const [chartClickedPoint, setChartClickedPoint] = useState(null);
+  const [granularForecastPage, setGranularForecastPage] = useState(1);
+  const [distBT,      setDistBT]      = useState('O+');
+  const [distComp,    setDistComp]    = useState('PRBC');
+  const [distReserve, setDistReserve] = useState(10);
 
   // Forecast Records table — independent filters
   const [recHospital, setRecHospital] = useState('ALL');
@@ -2279,20 +2289,12 @@ export default function AdminDashboard() {
 
           {/* TAB: DEMAND FORECASTING – OVERVIEW + DRILL-DOWN */}
           {tab === 'forecasting' && (() => {
-            // Safety guard — persist middleware may return undefined for new fields
             const gf = Array.isArray(granularForecasts) ? granularForecasts : [];
-
             const isOverview = fcHospital === 'ALL' && fcBloodType === 'ALL' && fcComponent === 'ALL';
-
-            // ── OVERVIEW MODE: Aggregate all forecasts per week ──
             const allWeekLabels = [...new Set(gf.map(f => f.forecastWeekLabel))].sort();
             const overviewChartData = (() => {
-              // Historical: sum actuals per week slot across all combos (use a representative sample to avoid double-counting)
-              // Each unique (hospital, bloodType, component) combo has the same historicalWeeks dates → grab one set
               const sampleHistorical = gf[0]?.historicalWeeks || [];
-
               const histPart = sampleHistorical.map((w, idx) => {
-                // Sum actuals for this week index across all unique combos (plain object, no Map constructor)
                 const seen = {};
                 gf.forEach(f => {
                   const key = `${f.hospitalId}|${f.bloodTypeId}|${f.componentId}`;
@@ -2303,8 +2305,6 @@ export default function AdminDashboard() {
                 const total = Object.values(seen).reduce((a, b) => a + b, 0);
                 return { label: `Wk ${idx + 1}`, actual: total, predicted: null, upper: null, lower: null };
               });
-
-              // Predicted: sum predictedDemand for each forecastWeekLabel
               const predPart = allWeekLabels.map(wkLabel => {
                 const rows = gf.filter(f => f.forecastWeekLabel === wkLabel);
                 const totalPred = rows.reduce((s, f) => s + f.predictedDemand, 0);
@@ -2312,18 +2312,13 @@ export default function AdminDashboard() {
                 const totalLower = rows.reduce((s, f) => s + f.lowerBound, 0);
                 return { label: wkLabel, actual: null, predicted: totalPred, upper: totalUpper, lower: totalLower };
               });
-
               return [...histPart, ...predPart];
             })();
-
-            // ── FILTERED MODE: specific combo ──
             const filtered = gf.filter(f =>
               (fcHospital === 'ALL' || f.hospitalId === fcHospital) &&
               (fcBloodType === 'ALL' || f.bloodTypeId === fcBloodType) &&
               (fcComponent === 'ALL' || f.componentId === fcComponent)
             );
-
-            // Aggregate filtered by week (when partially filtered, sum remaining)
             const filteredChartData = (() => {
               const sampleHistorical = filtered[0]?.historicalWeeks || [];
               const histPart = sampleHistorical.map((w, idx) => {
@@ -2350,7 +2345,6 @@ export default function AdminDashboard() {
               }).filter(Boolean);
               return [...histPart, ...predPart];
             })();
-
             const activeChartData = isOverview ? overviewChartData : filteredChartData;
 
             // KPI cards
@@ -2377,6 +2371,19 @@ export default function AdminDashboard() {
 
             return (
               <div className="space-y-5 fade-in">
+
+                {/* Loading toast at top */}
+                {fcLoading && (
+                  <div className="sticky top-4 z-40 flex items-center gap-3 bg-slate-900 text-white px-5 py-3 rounded-xl shadow-xl w-fit mx-auto">
+                    <div className="loading">
+                      <svg width="40px" height="30px" viewBox="0 0 48 48">
+                        <polyline points="0.15, 24 16.15, 24 20.15, 12 24.15, 36 28.15, 18 32.15, 30 36.15, 24 47.85, 24" id="back"></polyline>
+                        <polyline points="0.15, 24 16.15, 24 20.15, 12 24.15, 36 28.15, 18 32.15, 30 36.15, 24 47.85, 24" id="front"></polyline>
+                      </svg>
+                    </div>
+                    <span className="text-sm font-bold">Running MLR Forecast…</span>
+                  </div>
+                )}
 
                 {/* Algorithm banner */}
                 <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-xl p-5 flex items-start gap-4">
@@ -2409,13 +2416,23 @@ export default function AdminDashboard() {
                     <div className="flex items-center gap-2">
                       {!isOverview && (
                         <button onClick={() => { setFcHospital('ALL'); setFcBloodType('ALL'); setFcComponent('ALL'); }}
-                          className="text-xs font-bold text-slate-500 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition">
-                          ↩ Reset to Overview
+                          className="text-xs font-bold text-slate-500 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition cursor-pointer">
+                           Reset to Overview
                         </button>
                       )}
-                      <button onClick={() => generateGranularForecast(fcWeeks)}
-                        className="bg-slate-900 text-white px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-800 transition flex items-center gap-2 shadow-sm">
-                        <Activity className="w-3.5 h-3.5" /> Re-run Forecast
+                      <button
+                        disabled={fcLoading}
+                        onClick={async () => {
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                          setFcLoading(true);
+                          try { await generateGranularForecast(fcWeeks); }
+                          finally { setFcLoading(false); }
+                        }}
+                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 shadow-sm
+                          ${fcLoading ? 'bg-slate-500 text-slate-300 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-800 cursor-pointer'}`}>
+                        {fcLoading
+                          ? <><span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-white rounded-full animate-spin inline-block"></span> Running…</>
+                          : <><Activity className="w-3.5 h-3.5" /> Re-run Forecast</>}
                       </button>
                     </div>
                   </div>
@@ -2475,7 +2492,7 @@ export default function AdminDashboard() {
                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
                           {isOverview ? 'Total Next-Week Demand' : 'Next-Week (Filtered)'}
                         </p>
-                        <p className="text-2xl font-extrabold text-slate-900 font-mono">{totalForecastedUnitsNextWk}</p>
+                        <p className="text-2xl font-extrabold text-slate-900 font-mono">{totalForecastedUnitsNextWk.toFixed(0)}</p>
                         <p className="text-[10px] text-slate-400 mt-1">
                           {isOverview ? 'units across all hospitals' : `units · ${fcBloodType} ${fcComponent}`}
                         </p>
@@ -2496,7 +2513,7 @@ export default function AdminDashboard() {
                       </div>
                       <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Highest Demand (Next Wk)</p>
-                        <p className="text-2xl font-extrabold text-amber-600 font-mono">{highestDemandCombo?.predictedDemand ?? '—'}</p>
+                        <p className="text-2xl font-extrabold text-amber-600 font-mono">{highestDemandCombo?.predictedDemand.toFixed(0) ?? '—'}</p>
                         <p className="text-[10px] text-slate-400 mt-1 leading-tight">
                           {highestDemandCombo
                             ? `${highestDemandCombo.bloodTypeId} ${highestDemandCombo.componentId}`
@@ -2505,6 +2522,129 @@ export default function AdminDashboard() {
                         </p>
                       </div>
                     </div>
+
+                    {/* ── DEMAND VS INVENTORY GAP ANALYSIS ── */}
+                    {hasData && (() => {
+                      const BLOOD_TYPES = ['O+','O-','A+','A-','B+','B-','AB+','AB-'];
+                      const COMPONENTS  = ['PRBC','Platelet Concentrate','FFP','Cryoprecipitate','Cryosupernate'];
+
+                      // Count available units per blood_type + component from live inventory
+                      const availMap = {};
+                      (bloodInventory || []).forEach(u => {
+                        if (u.inventoryStatus !== 'Available' && u.inventory_status !== 'Available') return;
+                        const bt   = u.bloodType   || u.blood_type  || '';
+                        const comp = u.component   || u.componentType || '';
+                        const key  = `${bt}|${comp}`;
+                        availMap[key] = (availMap[key] || 0) + 1;
+                      });
+
+                      // Sum predicted demand (week 1) per blood_type + component across all hospitals
+                      const demandMap = {};
+                      gf.filter(f => f.weeksAhead === 1).forEach(f => {
+                        const key = `${f.bloodTypeId}|${f.componentId}`;
+                        demandMap[key] = (demandMap[key] || 0) + f.predictedDemand;
+                      });
+
+                      // Build gap rows
+                      const gapRows = [];
+                      BLOOD_TYPES.forEach(bt => {
+                        COMPONENTS.forEach(comp => {
+                          const key     = `${bt}|${comp}`;
+                          const demand  = Math.round(demandMap[key] || 0);
+                          const avail   = availMap[key] || 0;
+                          if (demand === 0 && avail === 0) return;
+                          const gap     = avail - demand;
+                          const ratio   = demand > 0 ? avail / demand : 1;
+                          const status  = gap < 0 ? 'Shortfall' : ratio < 1.2 ? 'Low Buffer' : 'Sufficient';
+                          gapRows.push({ bt, comp, demand, avail, gap, status });
+                        });
+                      });
+
+                      // Sort: Shortfall first, then Low Buffer, then Sufficient
+                      const order = { Shortfall: 0, 'Low Buffer': 1, Sufficient: 2 };
+                      gapRows.sort((a, b) => order[a.status] - order[b.status] || a.gap - b.gap);
+
+                      const shortfalls  = gapRows.filter(r => r.status === 'Shortfall').length;
+                      const lowBuffers  = gapRows.filter(r => r.status === 'Low Buffer').length;
+                      const sufficients = gapRows.filter(r => r.status === 'Sufficient').length;
+
+                      return (
+                        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                            <div>
+                              <h3 className="font-bold text-slate-900 text-sm tracking-tight">⚖️ Demand vs Inventory Gap Analysis</h3>
+                              <p className="text-xs text-slate-500 mt-0.5">Next-week predicted demand vs current available stock — helps identify shortfalls before they happen</p>
+                            </div>
+                            <div className="flex items-center gap-3 text-[10px] font-bold flex-shrink-0">
+                              {shortfalls > 0 && <span className="bg-rose-100 text-rose-700 border border-rose-200 px-2 py-1 rounded-full">{shortfalls} Shortfall{shortfalls > 1 ? 's' : ''}</span>}
+                              {lowBuffers > 0 && <span className="bg-amber-100 text-amber-700 border border-amber-200 px-2 py-1 rounded-full">{lowBuffers} Low Buffer</span>}
+                              {sufficients > 0 && <span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-full">{sufficients} Sufficient</span>}
+                            </div>
+                          </div>
+
+                          {gapRows.length === 0 ? (
+                            <div className="px-6 py-8 text-center text-slate-400 text-sm">
+                              Run the forecast first to see demand vs inventory comparison.
+                            </div>
+                          ) : (
+                            <div className="divide-y divide-slate-50">
+                              {/* Header */}
+                              <div className="grid grid-cols-12 px-6 py-2 bg-slate-50 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                <span className="col-span-2">Blood Type</span>
+                                <span className="col-span-3">Component</span>
+                                <span className="col-span-2 text-right">Predicted Demand</span>
+                                <span className="col-span-2 text-right">Available Stock</span>
+                                <span className="col-span-2 text-right">Gap</span>
+                                <span className="col-span-1 text-right">Status</span>
+                              </div>
+                              {gapRows.map(({ bt, comp, demand, avail, gap, status }) => {
+                                const isShortfall  = status === 'Shortfall';
+                                const isLowBuffer  = status === 'Low Buffer';
+                                const rowBg  = isShortfall ? 'bg-rose-50/60 hover:bg-rose-50' : isLowBuffer ? 'bg-amber-50/40 hover:bg-amber-50' : 'hover:bg-slate-50';
+                                const gapColor = isShortfall ? 'text-rose-700 font-bold' : isLowBuffer ? 'text-amber-700 font-bold' : 'text-emerald-700';
+                                const badge  = isShortfall
+                                  ? 'bg-rose-100 text-rose-700 border-rose-200'
+                                  : isLowBuffer
+                                  ? 'bg-amber-100 text-amber-700 border-amber-200'
+                                  : 'bg-emerald-100 text-emerald-700 border-emerald-200';
+                                const barPct = demand > 0 ? Math.min((avail / demand) * 100, 100) : 100;
+                                const barColor = isShortfall ? 'bg-rose-400' : isLowBuffer ? 'bg-amber-400' : 'bg-emerald-400';
+                                return (
+                                  <div key={`${bt}|${comp}`} className={`grid grid-cols-12 px-6 py-3 items-center transition text-xs ${rowBg}`}>
+                                    <span className="col-span-2 font-bold text-slate-800 font-mono">{bt}</span>
+                                    <span className="col-span-3 text-slate-600">{comp}</span>
+                                    <span className="col-span-2 text-right font-mono text-slate-700">{demand} units</span>
+                                    <div className="col-span-2 flex flex-col items-end gap-1">
+                                      <span className="font-mono text-slate-700">{avail} units</span>
+                                      <div className="w-16 h-1 bg-slate-200 rounded-full overflow-hidden">
+                                        <div className={`h-full ${barColor} rounded-full transition-all`} style={{ width: `${barPct}%` }} />
+                                      </div>
+                                    </div>
+                                    <span className={`col-span-2 text-right font-mono ${gapColor}`}>
+                                      {gap >= 0 ? `+${gap}` : gap} units
+                                    </span>
+                                    <span className="col-span-1 flex justify-end">
+                                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badge} whitespace-nowrap`}>
+                                        {status === 'Shortfall' ? '🔴' : status === 'Low Buffer' ? '🟡' : '🟢'} {status}
+                                      </span>
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {shortfalls > 0 && (
+                            <div className="px-6 py-3 bg-rose-50 border-t border-rose-100">
+                              <p className="text-xs text-rose-700 font-semibold">
+                                ⚠️ {shortfalls} blood type/component combination{shortfalls > 1 ? 's are' : ' is'} projected to run short next week.
+                                Consider initiating a procurement drive or requesting transfers from partner facilities.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Main Chart */}
                     <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
@@ -2517,7 +2657,8 @@ export default function AdminDashboard() {
                             }
                           </h3>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            Wk 1–8 = historical actual issuances (aggregated) | Wk 9+ = REMA predictions with ±8% confidence band
+                            Wk 1–8 = historical actual issuances (aggregated) | Wk 9+ = MLR predictions with ±8% confidence band
+                            {chartClickedPoint && <span className="ml-2 text-indigo-600 font-semibold cursor-pointer hover:underline" onClick={() => setChartClickedPoint(null)}>· Clear analysis ×</span>}
                           </p>
                         </div>
                         <div className="flex items-center gap-4 text-[10px] text-slate-500 font-semibold flex-shrink-0 ml-4">
@@ -2526,7 +2667,8 @@ export default function AdminDashboard() {
                           <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 bg-slate-300 inline-block rounded"></span>Confidence</span>
                         </div>
                       </div>
-                      <div className="h-80 w-full">
+                      <p className="text-[10px] text-slate-400 mb-2 italic">💡 Click on any data point to see an interpretation.</p>
+                      <div className="h-80 w-full cursor-pointer">
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={activeChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -2538,11 +2680,86 @@ export default function AdminDashboard() {
                             />
                             <Line type="monotone" dataKey="upper" stroke="#e2e8f0" strokeWidth={1.5} strokeDasharray="5 5" name="Upper Bound" dot={false} connectNulls />
                             <Line type="monotone" dataKey="lower" stroke="#e2e8f0" strokeWidth={1.5} strokeDasharray="5 5" name="Lower Bound" dot={false} connectNulls />
-                            <Line type="monotone" dataKey="actual" stroke="#10B981" strokeWidth={3} name="Actual (Historical)" dot={{ r: 4, fill: '#10B981' }} connectNulls />
-                            <Line type="monotone" dataKey="predicted" stroke="#4F46E5" strokeWidth={3} name="REMA Prediction" dot={{ r: 4, fill: '#4F46E5' }} connectNulls strokeDasharray={isOverview ? undefined : "6 3"} />
+                            <Line type="monotone" dataKey="actual" stroke="#10B981" strokeWidth={3} name="Actual (Historical)"
+                              dot={{ r: 5, fill: '#10B981', cursor: 'pointer' }}
+                              activeDot={{ r: 7, fill: '#10B981', stroke: '#fff', strokeWidth: 2, cursor: 'pointer',
+                                onClick: (event, payload) => { if (payload?.payload) setChartClickedPoint(payload.payload); }
+                              }}
+                              connectNulls />
+                            <Line type="monotone" dataKey="predicted" stroke="#4F46E5" strokeWidth={3} name="MLR Prediction"
+                              dot={{ r: 5, fill: '#4F46E5', cursor: 'pointer' }}
+                              activeDot={{ r: 7, fill: '#4F46E5', stroke: '#fff', strokeWidth: 2, cursor: 'pointer',
+                                onClick: (event, payload) => { if (payload?.payload) setChartClickedPoint(payload.payload); }
+                              }}
+                              connectNulls strokeDasharray={isOverview ? undefined : "6 3"} />
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
+
+                      {/* ── Click Analysis Panel ── */}
+                      {chartClickedPoint && (() => {
+                        const pt = chartClickedPoint;
+                        const isActual    = pt.actual !== null && pt.actual !== undefined;
+                        const isPredicted = pt.predicted !== null && pt.predicted !== undefined;
+                        const val         = isActual ? pt.actual : pt.predicted;
+                        const type        = isActual ? 'historical' : 'predicted';
+                        const upper       = pt.upper ?? Math.round(val * 1.08);
+                        const lower       = pt.lower ?? Math.max(0, Math.round(val * 0.92));
+
+                        // Determine demand level
+                        const allPredicted = activeChartData.filter(d => d.predicted).map(d => d.predicted);
+                        const avgPred = allPredicted.length ? allPredicted.reduce((a,b) => a+b,0)/allPredicted.length : val;
+                        const demandLevel = val > avgPred * 1.15 ? 'High' : val < avgPred * 0.85 ? 'Low' : 'Normal';
+                        const demandColor = demandLevel === 'High' ? 'text-rose-700 bg-rose-50 border-rose-200'
+                                          : demandLevel === 'Low'  ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                          : 'text-amber-700 bg-amber-50 border-amber-200';
+
+                        // Generate interpretation text
+                        const contextLabel = fcHospital !== 'ALL'
+                          ? hospitals.find(h => h.id === fcHospital)?.name?.split('(')[0].trim()
+                          : 'all hospitals combined';
+                        const btLabel  = fcBloodType !== 'ALL' ? `${fcBloodType} blood` : 'all blood types';
+                        const compLabel = fcComponent !== 'ALL' ? fcComponent : 'all components';
+
+                        const interpretation = isActual
+                          ? `During ${pt.label}, the actual recorded demand was ${val} units of ${btLabel} (${compLabel}) across ${contextLabel}. ` +
+                            (demandLevel === 'High'
+                              ? `This was above average, suggesting elevated patient need or increased hospital activity during this period. Blood bank staff should review what drove this spike to anticipate future occurrences.`
+                              : demandLevel === 'Low'
+                              ? `This was below average, which may indicate lower patient admissions, seasonal slowdown, or improved efficiency in blood utilization. This is a positive sign for inventory levels.`
+                              : `This reflects a normal, steady demand level — consistent with expected weekly consumption patterns. No unusual intervention is required.`)
+                          : `The MLR model predicts a demand of ${val} units for ${pt.label}, with a confidence range of ${lower}–${upper} units. ` +
+                            (demandLevel === 'High'
+                              ? `This forecast signals elevated anticipated need. The blood bank should prepare ${upper} units as a buffer and consider running a distribution recommendation for this component before the week begins.`
+                              : demandLevel === 'Low'
+                              ? `Demand is forecasted to be lower than average this week. This provides an opportunity to reduce stock rotation risk by fulfilling existing requests from older inventory first.`
+                              : `Demand is forecasted to remain at a steady, manageable level. Routine issuance operations should be sufficient without requiring additional stock mobilization.`);
+
+                        return (
+                          <div className="mt-4 border border-indigo-100 bg-indigo-50/60 rounded-xl p-4 animate-fadeIn">
+                            <div className="flex items-start gap-3">
+                              <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0 text-lg">
+                                {isActual ? '📈' : '🔮'}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap mb-1">
+                                  <span className="font-bold text-indigo-900 text-sm">{pt.label} Analysis</span>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${demandColor}`}>{demandLevel} Demand</span>
+                                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{type}</span>
+                                </div>
+                                <p className="text-xs text-slate-700 leading-relaxed">{interpretation}</p>
+                                {isPredicted && (
+                                  <div className="mt-2 flex items-center gap-4 text-[10px] text-slate-500">
+                                    <span>📉 Lower bound: <strong className="text-slate-700">{lower} units</strong></span>
+                                    <span>📈 Upper bound: <strong className="text-slate-700">{upper} units</strong></span>
+                                    <span>🎯 Point estimate: <strong className="text-indigo-700">{val} units</strong></span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
 
@@ -2561,11 +2778,18 @@ export default function AdminDashboard() {
                             const allTotal = gf.filter(f => f.weeksAhead === 1).reduce((s, f) => s + f.predictedDemand, 0);
                             const pct = allTotal ? Math.round((total / allTotal) * 100) : 0;
                             const barW = allTotal ? (total / allTotal) * 100 : 0;
+                            const logoImg = hospitals.find(h => h.id === hosp.id)?.name?.toLowerCase().includes('spmc') ? spmcLogo :
+                                            hospitals.find(h => h.id === hosp.id)?.name?.toLowerCase().includes('red cross') ? prcLogo :
+                                            hospitals.find(h => h.id === hosp.id)?.name?.toLowerCase().includes('san pedro') ? snbcLogo : davaoLogo;
                             return (
                               <button key={hosp.id} onClick={() => { setFcHospital(hosp.id); setRecHospital(hosp.id); }}
-                                className="w-full flex items-center gap-4 px-6 py-3.5 hover:bg-slate-50 transition text-left group">
+                                className="w-full flex items-center gap-4 px-6 py-3.5 hover:bg-slate-50 transition text-left group cursor-pointer">
+                                {/* Actual Hospital PNG Logo */}
+                                <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 p-1 flex items-center justify-center shadow-xs flex-shrink-0">
+                                  <img src={logoImg} alt={hosp.name} className="w-full h-full object-contain" />
+                                </div>
                                 <div className="w-36 flex-shrink-0">
-                                  <p className="font-bold text-slate-800 text-xs leading-tight group-hover:text-indigo-600 transition">{hosp.name.split('(')[0].trim()}</p>
+                                  <p className="font-bold text-slate-800 text-xs leading-tight group-hover:text-indigo-650 transition">{hosp.name.split('(')[0].trim()}</p>
                                   <p className="text-[10px] text-slate-400 font-mono mt-0.5">{hosp.id}</p>
                                 </div>
                                 <div className="flex-1">
@@ -2574,7 +2798,7 @@ export default function AdminDashboard() {
                                   </div>
                                 </div>
                                 <div className="w-20 text-right flex-shrink-0">
-                                  <span className="font-extrabold text-slate-900 font-mono text-sm">{total}</span>
+                                  <span className="font-extrabold text-slate-900 font-mono text-sm">{total.toFixed(0)}</span>
                                   <span className="text-[10px] text-slate-400 ml-1">units</span>
                                 </div>
                                 <span className="text-[10px] text-slate-400 w-10 text-right flex-shrink-0">{pct}%</span>
@@ -2630,7 +2854,7 @@ export default function AdminDashboard() {
                                   <button
                                     key={hosp.id}
                                     onClick={() => setDrilldownHospital(hosp)}
-                                    className="w-full flex items-center gap-4 px-6 py-4 hover:bg-indigo-50/40 transition text-left group"
+                                    className="w-full flex items-center gap-4 px-6 py-4 hover:bg-indigo-50/40 transition text-left group cursor-pointer"
                                   >
                                     {/* Rank badge */}
                                     <div className="w-7 h-7 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-[11px] font-black text-slate-500 flex-shrink-0 group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600 transition">
@@ -2662,17 +2886,18 @@ export default function AdminDashboard() {
 
                                     {/* Trend */}
                                     <div className="flex-shrink-0">
-                                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold border ${isRising ? 'bg-amber-50 border-amber-100 text-amber-700' :
+                                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold border ${
+                                        isRising ? 'bg-amber-50 border-amber-100 text-amber-700' :
                                         isFalling ? 'bg-emerald-50 border-emerald-100 text-emerald-700' :
-                                          'bg-slate-50 border-slate-200 text-slate-500'
-                                        }`}>
+                                        'bg-slate-50 border-slate-200 text-slate-500'
+                                      }`}>
                                         {isRising ? '↑ Rising' : isFalling ? '↓ Falling' : '→ Stable'}
                                       </span>
                                     </div>
 
                                     {/* Bag count */}
                                     <div className="w-24 text-right flex-shrink-0">
-                                      <span className="font-black text-indigo-600 font-mono text-base">{totalBags}</span>
+                                      <span className="font-black text-indigo-600 font-mono text-base">{totalBags.toFixed(0)}</span>
                                       <span className="text-[10px] text-slate-400 ml-1">bags</span>
                                       <p className="text-[9px] text-slate-400">{pct}% of total</p>
                                     </div>
@@ -2720,7 +2945,7 @@ export default function AdminDashboard() {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
                                   </svg>
                                 </button>
-
+                                
                                 {/* Actual Hospital PNG Logo */}
                                 <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 p-1 flex items-center justify-center shadow-sm flex-shrink-0">
                                   <img src={logoImg} alt={drilldownHospital.name} className="w-full h-full object-contain" />
@@ -2735,7 +2960,7 @@ export default function AdminDashboard() {
                                 </div>
                               </div>
                               <div className="text-right">
-                                <p className="text-2xl font-black text-indigo-600 font-mono">{totalBags}</p>
+                                <p className="text-2xl font-black text-indigo-600 font-mono">{totalBags.toFixed(0)}</p>
                                 <p className="text-[10px] text-slate-400">total bags next week</p>
                               </div>
                             </div>
@@ -2745,7 +2970,7 @@ export default function AdminDashboard() {
                               {[
                                 { label: 'Blood Types', value: byType.length },
                                 { label: 'Components', value: [...new Set(hospRows.map(f => f.componentId))].length },
-                                { label: 'Highest Demand', value: hospRows.length ? hospRows.reduce((a, b) => b.predictedDemand > a.predictedDemand ? b : a, hospRows[0]) : null, render: v => v ? `${v.bloodTypeId} ${v.componentId}` : '—' },
+                                { label: 'Highest Demand', value: hospRows.length ? hospRows.reduce((a,b) => b.predictedDemand > a.predictedDemand ? b : a, hospRows[0]) : null, render: v => v ? `${v.bloodTypeId} ${v.componentId}` : '—' },
                                 { label: 'Rising Trends', value: hospRows.filter(f => f.slope > 0).length }
                               ].map((kpi, i) => (
                                 <div key={i} className="px-5 py-3 text-center">
@@ -2771,7 +2996,7 @@ export default function AdminDashboard() {
                                           <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${(total / allTotal) * 100}%` }} />
                                         </div>
                                       </div>
-                                      <span className="font-black text-indigo-600 font-mono text-sm">{total}</span>
+                                      <span className="font-black text-indigo-600 font-mono text-sm">{total.toFixed(0)}</span>
                                       <span className="text-[10px] text-slate-400">bags</span>
                                       <span className="text-[10px] text-slate-400 w-8 text-right">{Math.round((total / allTotal) * 100)}%</span>
                                     </div>
@@ -2784,12 +3009,13 @@ export default function AdminDashboard() {
                                           <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                             <div className="h-full bg-blue-400 rounded-full" style={{ width: `${total ? (f.predictedDemand / total) * 100 : 0}%` }} />
                                           </div>
-                                          <span className="font-extrabold text-slate-800 font-mono text-sm w-8 text-right">{f.predictedDemand}</span>
-                                          <span className="text-[9px] text-slate-400 w-16 text-right">±{f.lowerBound}–{f.upperBound}</span>
-                                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold border w-16 text-center ${f.slope > 0 ? 'bg-amber-50 border-amber-100 text-amber-700' :
+                                          <span className="font-extrabold text-slate-800 font-mono text-sm w-8 text-right">{f.predictedDemand.toFixed(0)}</span>
+                                          <span className="text-[9px] text-slate-400 w-16 text-right">±{f.lowerBound.toFixed(0)}–{f.upperBound.toFixed(0)}</span>
+                                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold border w-16 text-center ${
+                                            f.slope > 0 ? 'bg-amber-50 border-amber-100 text-amber-700' :
                                             f.slope < 0 ? 'bg-emerald-50 border-emerald-100 text-emerald-700' :
-                                              'bg-slate-50 border-slate-200 text-slate-500'
-                                            }`}>{f.slope > 0 ? '↑ Rising' : f.slope < 0 ? '↓ Falling' : '→ Stable'}</span>
+                                            'bg-slate-50 border-slate-200 text-slate-500'
+                                          }`}>{f.slope > 0 ? '↑ Rising' : f.slope < 0 ? '↓ Falling' : '→ Stable'}</span>
                                         </div>
                                       ))}
                                     </div>
@@ -2815,269 +3041,373 @@ export default function AdminDashboard() {
           {/* TAB: DISTRIBUTION RECOMMENDATION (CAPSTONE) – EQUITY ALGORITHM */}
           {/* TAB: DISTRIBUTION RECOMMENDATION (CAPSTONE) – EQUITY ALGORITHM */}
           {tab === 'distribution' && (() => {
-            const allocations = getEquityAllocations();
+            const BLOOD_TYPES_LIST = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
+            const COMPONENTS_LIST  = ['PRBC', 'Platelet Concentrate', 'FFP', 'Cryoprecipitate', 'Cryosupernate'];
+
+            // Active blood requests — verified but NOT yet fully fulfilled
+            // Include 'Partially Fulfilled' so remaining unmet components still show
+            const activeReqs = (bloodRequests || []).filter(r =>
+              ['Verified', 'Pending Review', 'Approved', 'Partially Fulfilled'].includes(r.status)
+            );
+
+            // Urgency multipliers for equity-weighted allocation
+            const URGENCY_MULTIPLIER = { 'Emergency': 1.5, 'Urgent': 1.25, 'Routine': 1.0 };
+
+            const handleComputeEquity = () => {
+              // Ensure forecast exists — generate if empty
+              if (!granularForecasts || granularForecasts.length === 0) {
+                generateGranularForecast(4);
+              }
+              const gf = granularForecasts || [];
+
+              // Filter to selected BT + Component, nearest week (weeksAhead === 1)
+              const nearest = gf.filter(f =>
+                f.bloodTypeId === distBT &&
+                f.componentId === distComp &&
+                f.weeksAhead  === 1
+              );
+
+              // Count available bags from real inventory
+              const totalInventory = (bloodInventory || []).filter(u =>
+                (u.bloodType ?? u.bloodTypeId) === distBT &&
+                (u.component ?? u.componentId) === distComp &&
+                u.inventoryStatus === 'Available'
+              ).length;
+
+              const reserve   = Math.min(Number(distReserve) || 0, totalInventory);
+              const available = Math.max(0, totalInventory - reserve);
+
+              // Build per-hospital forecast map
+              const forecastMap = {};
+              nearest.forEach(f => {
+                forecastMap[f.hospitalId] = {
+                  hospitalId:   f.hospitalId,
+                  hospitalName: f.hospitalName,
+                  predicted:    f.predictedDemand,
+                };
+              });
+
+              const itemMatcher = it => {
+                const bt   = it.bloodType  ?? it.blood_type   ?? '';
+                const comp = it.component  ?? it.bloodComponent ?? '';
+                return bt === distBT && comp === distComp;
+              };
+
+              // For hospitals with no forecast entry, default to 0
+              const allHospitals = hospitals || [];
+
+              // Determine highest urgency level per hospital (from active requests)
+              const hospitalUrgencyMap = {};
+              activeReqs.forEach(req => {
+                const reqHospId = req.hospitalId ?? req.hospital_id ?? '';
+                if ((req.items || []).some(itemMatcher)) {
+                  const lvl = req.urgencyLevel ?? req.urgency_level ?? 'Routine';
+                  const prev = hospitalUrgencyMap[reqHospId];
+                  // Keep highest urgency: Emergency > Urgent > Routine
+                  if (!prev ||
+                      (lvl === 'Emergency') ||
+                      (lvl === 'Urgent' && prev === 'Routine')) {
+                    hospitalUrgencyMap[reqHospId] = lvl;
+                  }
+                }
+              });
+
+              const rows = allHospitals.map(h => ({
+                hospitalId:   h.id,
+                hospitalName: h.name,
+                hospitalType: h.type,
+                predicted:    forecastMap[h.id]?.predicted ?? 0,
+                urgencyLevel: hospitalUrgencyMap[h.id] ?? null,
+              }));
+
+              // Step 1: compute adjusted weights (forecast × urgency multiplier)
+              const rowsWithAdj = rows.map(r => {
+                const multiplier = r.urgencyLevel ? (URGENCY_MULTIPLIER[r.urgencyLevel] ?? 1.0) : 1.0;
+                const adjusted   = r.predicted * multiplier;
+                return { ...r, multiplier, adjusted };
+              });
+
+              const totalForecast = rows.reduce((s, r) => s + r.predicted, 0);
+              const totalAdjusted = rowsWithAdj.reduce((s, r) => s + r.adjusted, 0);
+
+              // Compute equity allocation using adjusted weights
+              const results = rowsWithAdj.map(r => {
+                const weight     = totalAdjusted > 0 ? r.adjusted / totalAdjusted : 1 / rows.length;
+                const allocation = Math.round(weight * available);
+
+                const matchingReqs = activeReqs.filter(req => {
+                  const reqHospId = req.hospitalId ?? req.hospital_id ?? '';
+                  return reqHospId === r.hospitalId && (req.items || []).some(itemMatcher);
+                });
+
+                const hasRequest = matchingReqs.length > 0;
+                const reqUnits = matchingReqs.reduce((sum, req) => {
+                  const item = (req.items || []).find(itemMatcher);
+                  return sum + (item?.units ?? 0);
+                }, 0);
+
+                return {
+                  ...r,
+                  weight:      +(weight * 100).toFixed(1),
+                  allocation,
+                  hasRequest,
+                  reqUnits,
+                  canFulfill:  allocation >= reqUnits && reqUnits > 0 ? 'full'
+                              : allocation > 0 && reqUnits > 0 ? 'partial'
+                              : reqUnits === 0 ? 'no-req'
+                              : 'none',
+                };
+              });
+
+              const key = `${distBT}|${distComp}`;
+              const computedAt = new Date().toLocaleString('en-PH', {
+                dateStyle: 'medium', timeStyle: 'short'
+              });
+              setEquityResult(key, results, {
+                totalInventory, reserve, available,
+                totalForecast, totalAdjusted, computedAt,
+              });
+            };
+
+            // Derive display state from the Zustand store for the currently selected BT+Comp
+            const currentKey   = `${distBT}|${distComp}`;
+            const currentEntry = equityResultsMap[currentKey];
+            const distComputed = !!currentEntry;
+            const distResults  = currentEntry?.results ?? [];
+            const distMeta     = currentEntry?.meta    ?? null;
+
             return (
-              <div className="space-y-5 fade-in">
+              <div className="space-y-5 animate-in fade-in duration-200">
+
                 {/* Info banner */}
-                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
-                  <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
+                  <Activity className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
                   <div className="text-xs text-blue-800">
-                    <p className="font-bold mb-0.5">Equity-Based Blood Distribution Algorithm</p>
-                    <p className="text-blue-700">Allocations are computed proportionally based on hospital type weighting (Government 1.5×, Blood Bank 1.2×, Private 1.0×) and the next predicted demand week. Only units above the safety threshold are released.</p>
+                    <p className="font-bold text-sm mb-1">Equity-Based Blood Distribution Allocation</p>
+                    <p className="text-blue-700 leading-relaxed">
+                      Allocations are computed proportionally using the Multiple Linear Regression forecasted demand per hospital.
+                      A predefined emergency reserve is set aside first, then the remaining units are distributed based on each hospital's share of total predicted demand.
+                      This output is a <strong>decision-support recommendation only</strong> — final allocation is at the discretion of authorized SNBC-Mindanao personnel.
+                    </p>
                   </div>
                 </div>
 
-                {allocations.map(({ bloodType, status, allocations: hospAllocs }) => (
-                  <div key={bloodType} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                    <div className={`px-6 py-3 border-b border-slate-100 flex items-center justify-between ${status === 'critical' ? 'bg-rose-50/30' : status === 'low' ? 'bg-amber-50/20' : ''
-                      }`}>
-                      <div className="flex items-center gap-3">
-                        <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded text-sm font-mono">{bloodType}</span>
-                        <span className={`text-[10px] font-bold uppercase tracking-wider ${status === 'critical' ? 'text-[#C21C24]' : status === 'low' ? 'text-amber-600' : 'text-emerald-600'
-                          }`}>{status === 'critical' ? '⚠ Critical' : status === 'low' ? '↓ Low Stock' : '✓ Stable'}</span>
-                        <span className="text-[10px] text-slate-400">Stock: {hospAllocs[0]?.currentStock} / Threshold: {hospAllocs[0]?.threshold} / Releasable: {hospAllocs[0]?.safeToRelease}</span>
-                      </div>
-                      {hospAllocs[0]?.safeToRelease === 0 && (
-                        <button onClick={() => handleEmergencyRetrack(bloodType)} className="flex items-center gap-1.5 text-[10px] font-bold text-[#C21C24] bg-rose-50 border border-rose-100 px-2.5 py-1 rounded hover:bg-rose-100 transition">
-                          <AlertTriangle className="w-3 h-3" /> Emergency Retrack
-                        </button>
-                      )}
-                    </div>
-                    {hospAllocs[0]?.safeToRelease > 0 ? (
-                      <table className="min-w-full">
-                        <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-450 uppercase tracking-wider">
-                          <tr>
-                            <th className="px-6 py-3 text-left">Hospital / Centre</th>
-                            <th className="px-6 py-3 text-left">Type</th>
-                            <th className="px-6 py-3 text-left">Weight</th>
-                            <th className="px-6 py-3 text-left">Suggested Units</th>
-                            <th className="px-6 py-3 text-left">Emergency Contact</th>
-                            <th className="px-6 py-3 text-left">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-650">
-                          {hospAllocs.map(a => (
-                            <tr key={a.hospitalId} className="hover:bg-slate-50/50 transition-colors">
-                              <td className="px-6 py-3 font-bold text-slate-900">{a.hospitalName}</td>
-                              <td className="px-6 py-3">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${a.hospitalType === 'Government' ? 'bg-blue-50 border-blue-100 text-blue-700' :
-                                  a.hospitalType === 'Blood Bank' ? 'bg-indigo-50 border-indigo-100 text-indigo-700' :
-                                    'bg-slate-50 border-slate-200 text-slate-600'
-                                  }`}>{a.hospitalType}</span>
-                              </td>
-                              <td className="px-6 py-3 font-mono text-slate-600">{a.hospitalType === 'Government' ? '1.5×' : a.hospitalType === 'Blood Bank' ? '1.2×' : '1.0×'}</td>
-                              <td className="px-6 py-3">
-                                <span className="text-lg font-black text-slate-900 font-mono">{a.suggestedUnits}</span>
-                                <span className="text-slate-400 ml-1 text-[10px]">bags</span>
-                              </td>
-                              <td className="px-6 py-3">
-                                <p className="font-bold text-slate-700">{a.hospitalContact}</p>
-                                <p className="font-mono text-[10px] text-blue-600">{a.hospitalPhone}</p>
-                              </td>
-                              <td className="px-6 py-3">
-                                {a.suggestedUnits > 0 ? (
-                                  <button
-                                    onClick={() => {
-                                      setAllocateTarget({ hospitalId: a.hospitalId, hospitalName: a.hospitalName, bloodType, units: a.suggestedUnits });
-                                      setShowAllocateModal(true);
-                                    }}
-                                    className="bg-emerald-600 text-white font-bold text-[10px] px-3 py-1.5 rounded hover:bg-emerald-700 transition"
-                                  >
-                                    Allocate
-                                  </button>
-                                ) : (
-                                  <span className="text-[10px] text-slate-400">No surplus</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div className="px-6 py-5 text-xs text-amber-700 font-bold flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4" /> Cannot allocate – stock is at or below safety threshold. Use Emergency Retrack to locate a lending source.
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {/* PERSISTENT RECOMMENDATIONS REQUIRING APPROVAL (Table 15) */}
-                <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                  {/* Header */}
-                  <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-4 flex-wrap">
+                {/* Configuration Panel */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4 flex items-center gap-2">
+                    <Database className="w-4 h-4 text-indigo-500" /> Allocation Parameters
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
-                      <h3 className="font-bold text-slate-900 flex items-center gap-2 text-sm">
-                        <Database className="w-4 h-4 text-indigo-600" /> Distribution Recommendations
-                        <span className="text-[10px] font-mono text-slate-400 ml-1">Table 15</span>
-                      </h3>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Output of the Equity-Based Allocation algorithm. Nothing takes effect until an Administrator explicitly approves it.
-                      </p>
+                      <label className="block text-xs font-bold text-slate-600 mb-1.5">Blood Type</label>
+                      <select value={distBT} onChange={e => setDistBT(e.target.value)}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-slate-50">
+                        {BLOOD_TYPES_LIST.map(bt => <option key={bt} value={bt}>{bt}</option>)}
+                      </select>
                     </div>
-                    <button
-                      onClick={() => {
-                        if (granularForecasts.length === 0) {
-                          generateGranularForecast(4);
-                          setTimeout(() => generateRecommendationsFromForecast(), 100);
-                        } else {
-                          generateRecommendationsFromForecast();
-                        }
-                      }}
-                      className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2 rounded-lg transition shadow-sm"
-                    >
-                      <Activity className="w-3.5 h-3.5" />
-                      Generate from Latest Forecast
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1.5">Blood Component</label>
+                      <select value={distComp} onChange={e => setDistComp(e.target.value)}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-slate-50">
+                        {COMPONENTS_LIST.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1.5">Emergency Reserve (units)</label>
+                      <input type="number" min={0} value={distReserve}
+                        onChange={e => setDistReserve(Math.max(0, Number(e.target.value)))}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-slate-50" />
+                      <p className="text-[10px] text-slate-400 mt-1">Units reserved for emergencies before distribution</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <button onClick={handleComputeEquity}
+                      className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white text-xs font-bold px-5 py-2.5 rounded-lg shadow transition-colors cursor-pointer">
+                      <Activity className="w-3.5 h-3.5" /> Compute Equity Allocation
                     </button>
                   </div>
-
-                  {/* Status filter tabs */}
-                  {(() => {
-                    const allRecs = recommendations || [];
-                    const counts = {
-                      All: allRecs.length,
-                      Pending: allRecs.filter(r => r.status === 'Pending').length,
-                      Approved: allRecs.filter(r => r.status === 'Approved').length,
-                      Rejected: allRecs.filter(r => r.status === 'Rejected').length,
-                    };
-                    const [recFilter, setRecFilter] = window.__recFilterState || [null, null];
-                    // Use local state via a simple trick — read from dataset
-                    const activeFilter = document.getElementById('rec-filter-active')?.dataset?.filter || 'All';
-
-                    const filtered = activeFilter === 'All' ? allRecs :
-                      allRecs.filter(r => r.status === activeFilter);
-
-                    return (
-                      <>
-                        <div className="px-6 pt-3 pb-0 flex gap-2 border-b border-slate-100">
-                          {['All', 'Pending', 'Approved', 'Rejected'].map(f => (
-                            <button
-                              key={f}
-                              id={f === 'All' ? 'rec-filter-active' : undefined}
-                              data-filter={f === activeFilter ? f : undefined}
-                              onClick={e => {
-                                // Toggle active filter via DOM dataset
-                                document.getElementById('rec-filter-active')?.removeAttribute('id');
-                                e.currentTarget.id = 'rec-filter-active';
-                                e.currentTarget.dataset.filter = f;
-                                // Force re-render by dispatching a harmless state update
-                                document.getElementById('rec-filter-active').dispatchEvent(new Event('change', { bubbles: true }));
-                              }}
-                              className={`px-3 py-2 text-[10px] font-bold uppercase tracking-wider border-b-2 transition -mb-px ${activeFilter === f
-                                ? 'border-indigo-600 text-indigo-600'
-                                : 'border-transparent text-slate-400 hover:text-slate-600'
-                                }`}
-                            >
-                              {f} <span className="ml-1 bg-slate-100 px-1 rounded font-mono">{counts[f]}</span>
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="overflow-x-auto">
-                          {allRecs.length === 0 ? (
-                            <div className="px-6 py-12 text-center text-slate-400 text-xs">
-                              <Activity className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-                              <p>No recommendations yet. Click <strong>Generate from Latest Forecast</strong> to create recommendations from the MLR forecast output.</p>
-                            </div>
-                          ) : (
-                            <table className="min-w-full text-left text-xs font-semibold text-slate-650">
-                              <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                <tr>
-                                  <th className="px-5 py-3 text-left">Rec. ID</th>
-                                  <th className="px-5 py-3 text-left">Forecast ID</th>
-                                  <th className="px-5 py-3 text-left">Hospital</th>
-                                  <th className="px-5 py-3 text-center">Blood Type</th>
-                                  <th className="px-5 py-3 text-left">Component</th>
-                                  <th className="px-5 py-3 text-center">Qty</th>
-                                  <th className="px-5 py-3 text-left">Date Generated</th>
-                                  <th className="px-5 py-3 text-center">Status</th>
-                                  <th className="px-5 py-3 text-center">Actions</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100">
-                                {allRecs.map(rec => {
-                                  const hosp = hospitals.find(h => h.id === rec.hospitalId);
-                                  return (
-                                    <tr key={rec.recommendationId} className="hover:bg-slate-50/50 transition-colors">
-                                      {/* Rec ID */}
-                                      <td className="px-5 py-3 font-mono font-bold text-slate-900 text-[10px]">{rec.recommendationId}</td>
-
-                                      {/* Forecast ID — FK link */}
-                                      <td className="px-5 py-3">
-                                        <span className="font-mono text-[10px] bg-blue-50 border border-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
-                                          #{rec.forecastId}
-                                        </span>
-                                      </td>
-
-                                      {/* Hospital */}
-                                      <td className="px-5 py-3 font-bold text-slate-800 whitespace-nowrap">
-                                        {rec.hospitalName || hosp?.name || rec.hospitalId}
-                                      </td>
-
-                                      {/* Blood Type */}
-                                      <td className="px-5 py-3 text-center">
-                                        <span className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded text-[10px] font-mono">
-                                          {rec.bloodTypeId}
-                                        </span>
-                                      </td>
-
-                                      {/* Component */}
-                                      <td className="px-5 py-3 text-slate-700">{rec.componentId}</td>
-
-                                      {/* Qty */}
-                                      <td className="px-5 py-3 text-center font-mono font-bold text-slate-900">
-                                        {rec.recommendedQuantity}
-                                        <span className="text-[9px] text-slate-400 ml-1">bags</span>
-                                      </td>
-
-                                      {/* Date Generated */}
-                                      <td className="px-5 py-3 font-mono text-[10px] text-slate-500">
-                                        {rec.recommendationDate || '—'}
-                                      </td>
-
-                                      {/* Status */}
-                                      <td className="px-5 py-3 text-center">
-                                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold border whitespace-nowrap ${rec.status === 'Approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-                                          rec.status === 'Rejected' ? 'bg-rose-50 text-[#C21C24] border-rose-100' :
-                                            'bg-amber-50 text-amber-700 border-amber-100'
-                                          }`}>
-                                          {rec.status}
-                                        </span>
-                                      </td>
-
-                                      {/* Actions */}
-                                      <td className="px-5 py-3">
-                                        {rec.status === 'Pending' ? (
-                                          <div className="flex items-center justify-center gap-2">
-                                            <button
-                                              onClick={() => approveRecommendation(rec.recommendationId)}
-                                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-3 py-1 rounded transition"
-                                            >
-                                              Approve
-                                            </button>
-                                            <button
-                                              onClick={() => rejectRecommendation(rec.recommendationId)}
-                                              className="bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 font-bold text-[10px] px-3 py-1 rounded transition"
-                                            >
-                                              Reject
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <div className="text-center text-[10px] text-slate-400">
-                                            <p className="font-bold text-slate-600">{rec.approvedBy || '—'}</p>
-                                            <p className="font-mono">{rec.actedAt ? rec.actedAt.replace('T', ' ') : ''}</p>
-                                          </div>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          )}
-                        </div>
-                      </>
-                    );
-                  })()}
                 </div>
+
+                {/* Results — shown after compute */}
+                {distComputed && distMeta && (
+                  <>
+                    {/* Summary cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                      {[
+                        { label: 'Total Inventory', value: distMeta.totalInventory, sub: `${distBT} ${distComp} available`, color: 'indigo' },
+                        { label: 'Emergency Reserve', value: distMeta.reserve, sub: 'Units set aside', color: 'amber' },
+                        { label: 'Distributable Units', value: distMeta.available, sub: 'After reserve deduction', color: 'emerald' },
+                        { label: 'Total Forecast Demand', value: distMeta.totalForecast, sub: 'Across all hospitals (nearest MLR week)', color: 'blue' },
+                        { label: 'Computed At', value: distMeta.computedAt?.split(',')[1]?.trim() ?? '—', sub: distMeta.computedAt?.split(',')[0] ?? '', color: 'slate' },
+                      ].map(card => (
+                        <div key={card.label} className={`bg-white border border-slate-200 rounded-xl p-4 shadow-sm`}>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">{card.label}</p>
+                          <p className={`text-2xl font-black ${
+                            card.color === 'indigo' ? 'text-indigo-700' :
+                            card.color === 'amber'  ? 'text-amber-600' :
+                            card.color === 'emerald'? 'text-emerald-600' : 'text-blue-700'
+                          }`}>{card.value}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{card.sub}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Allocation Table */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                      <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Recommended Allocation</h3>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{distBT} · {distComp} · {new Date().toLocaleDateString('en-PH', { dateStyle: 'medium' })}</p>
+                        </div>
+                        <span className="text-[10px] bg-blue-50 border border-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded">
+                          {distResults.length} hospitals
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-100 uppercase tracking-wider text-slate-400 font-bold">
+                              <th className="px-5 py-3">Hospital</th>
+                              <th className="px-5 py-3 text-center">Type</th>
+                              <th className="px-5 py-3 text-center">MLR Forecast</th>
+                              <th className="px-5 py-3 text-center">Urgency</th>
+                              <th className="px-5 py-3 text-center">Adj. Weight</th>
+                              <th className="px-5 py-3 text-center">Equity Share</th>
+                              <th className="px-5 py-3 text-center">Recommended Allocation</th>
+                              <th className="px-5 py-3 text-center">Active Request</th>
+                              <th className="px-5 py-3 text-center">Fulfillment</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {distResults.map(row => (
+                              <tr key={row.hospitalId} className={`transition-colors ${
+                                row.hasRequest ? 'bg-blue-50/40 hover:bg-blue-50/70' : 'hover:bg-slate-50/60'
+                              }`}>
+                                <td className="px-5 py-3.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-slate-900 text-sm">{row.hospitalName}</span>
+                                    {row.hasRequest && (
+                                      <span className="text-[9px] bg-blue-100 text-blue-700 border border-blue-200 font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider">Has Request</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-5 py-3.5 text-center">
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                    row.hospitalType === 'Government' ? 'bg-indigo-50 border-indigo-100 text-indigo-700' :
+                                    row.hospitalType === 'Blood Bank'  ? 'bg-rose-50 border-rose-100 text-rose-700' :
+                                    'bg-slate-50 border-slate-200 text-slate-600'
+                                  }`}>{row.hospitalType}</span>
+                                </td>
+                                <td className="px-5 py-3.5 text-center font-bold text-slate-700">{row.predicted}</td>
+                                <td className="px-5 py-3.5 text-center">
+                                  {row.urgencyLevel ? (
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                      row.urgencyLevel === 'Emergency' ? 'bg-red-50 border-red-200 text-red-700' :
+                                      row.urgencyLevel === 'Urgent'    ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                                      'bg-slate-50 border-slate-200 text-slate-600'
+                                    }`}>{row.urgencyLevel} ×{row.multiplier}</span>
+                                  ) : (
+                                    <span className="text-slate-300 text-[10px] font-semibold">Routine ×1.0</span>
+                                  )}
+                                </td>
+                                <td className="px-5 py-3.5 text-center font-mono text-slate-600 text-[11px]">
+                                  {row.adjusted?.toFixed(1) ?? row.predicted}
+                                </td>
+                                <td className="px-5 py-3.5 text-center">
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="font-bold text-slate-800">{row.weight}%</span>
+                                    <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                      <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${row.weight}%` }} />
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-5 py-3.5 text-center">
+                                  <span className="text-lg font-black text-slate-900">{row.allocation}</span>
+                                  <span className="text-[10px] text-slate-400 ml-1">units</span>
+                                </td>
+                                <td className="px-5 py-3.5 text-center">
+                                  {row.hasRequest
+                                    ? <span className="font-bold text-blue-700">{row.reqUnits} units</span>
+                                    : <span className="text-slate-300 font-semibold">—</span>
+                                  }
+                                </td>
+                                <td className="px-5 py-3.5 text-center">
+                                  {row.canFulfill === 'full'    && <span className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded"><CheckCircle className="w-3 h-3" /> Fully Met</span>}
+                                  {row.canFulfill === 'partial' && <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded"><AlertTriangle className="w-3 h-3" /> Partial</span>}
+                                  {row.canFulfill === 'no-req'  && <span className="text-slate-300 text-[10px] font-semibold">No Request</span>}
+                                  {row.canFulfill === 'none'    && <span className="inline-flex items-center gap-1 bg-rose-50 border border-rose-100 text-[#C21C24] text-[10px] font-bold px-2 py-0.5 rounded"><AlertTriangle className="w-3 h-3" /> Cannot Fulfill</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="bg-slate-50 border-t border-slate-200 font-bold text-slate-700">
+                              <td className="px-5 py-3" colSpan={4}>Totals</td>
+                              <td className="px-5 py-3 text-center">{distMeta.totalForecast}</td>
+                              <td className="px-5 py-3 text-center">100%</td>
+                              <td className="px-5 py-3 text-center">{distMeta.available} units</td>
+                              <td colSpan={2} />
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Formula Transparency Panel */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4 flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-indigo-500" /> Algorithm Computation (Equity Formula)
+                      </h3>
+                      <div className="space-y-3 text-xs text-slate-700">
+                        <div className="bg-slate-50 rounded-lg p-3 font-mono text-[11px] space-y-1">
+                          <p className="text-slate-400 font-sans font-semibold mb-2">Step 1 — Available Blood for Distribution:</p>
+                          <p>AvailableBlood = TotalInventory &minus; EmergencyReserve</p>
+                          <p className="text-indigo-700 font-bold">AvailableBlood = {distMeta.totalInventory} &minus; {distMeta.reserve} = <strong>{distMeta.available} units</strong></p>
+                        </div>
+                        <div className="bg-slate-50 rounded-lg p-3 font-mono text-[11px] space-y-1">
+                          <p className="text-slate-400 font-sans font-semibold mb-2">Step 2 — Urgency Adjustment per Hospital:</p>
+                          <p>AdjustedWeight<sub>h</sub> = ForecastedDemand<sub>h</sub> &times; UrgencyMultiplier<sub>h</sub></p>
+                          <p className="text-[10px] text-slate-400 font-sans">Multipliers: Emergency = 1.5 &nbsp;|&nbsp; Urgent = 1.25 &nbsp;|&nbsp; Routine = 1.0</p>
+                          <div className="mt-2 space-y-1">
+                            {distResults.map(row => (
+                              <p key={row.hospitalId} className="text-indigo-700">
+                                {row.hospitalName.split(' ')[0]}: {row.predicted} &times; {row.multiplier ?? 1.0} = <strong>{row.adjusted?.toFixed(1) ?? row.predicted}</strong>
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="bg-slate-50 rounded-lg p-3 font-mono text-[11px] space-y-1">
+                          <p className="text-slate-400 font-sans font-semibold mb-2">Step 3 — Proportional Allocation per Hospital:</p>
+                          <p>Allocation<sub>h</sub> = (AdjustedWeight<sub>h</sub> / &Sigma;AdjustedWeights) &times; AvailableBlood</p>
+                          <p className="text-[10px] text-slate-400 font-sans">&Sigma;AdjustedWeights = {distMeta.totalAdjusted?.toFixed(1) ?? distMeta.totalForecast}</p>
+                          <div className="mt-2 space-y-1">
+                            {distResults.map(row => (
+                              <p key={row.hospitalId} className="text-indigo-700">
+                                {row.hospitalName.split(' ')[0]}: ({row.adjusted?.toFixed(1) ?? row.predicted} / {distMeta.totalAdjusted?.toFixed(1) ?? distMeta.totalForecast}) &times; {distMeta.available} = <strong>{row.allocation}</strong>
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400 italic">
+                          Forecasted demand is generated by the Multiple Linear Regression model using historical blood issuance records.
+                          Emergency reserve of {distMeta.reserve} unit(s) is preserved before distribution.
+                          Urgency multipliers prioritize hospitals with active Emergency or Urgent requests.
+                          All recommendations are subject to final approval by authorized SNBC-Mindanao personnel.
+                          Computed: {distMeta.computedAt ?? '—'}
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Placeholder when not yet computed */}
+                {!distComputed && (
+                  <div className="bg-white rounded-xl border border-dashed border-slate-200 p-12 text-center">
+                    <Activity className="w-10 h-10 text-slate-200 mx-auto mb-3" />
+                    <p className="font-bold text-slate-400 text-sm">No allocation computed yet</p>
+                    <p className="text-xs text-slate-300 mt-1">Select a blood type, component, and emergency reserve above, then click <strong>Compute Equity Allocation</strong>.</p>
+                  </div>
+                )}
 
               </div>
             );
