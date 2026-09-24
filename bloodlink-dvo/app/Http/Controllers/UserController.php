@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use App\Services\AuditLogger;
 
 class UserController extends Controller
 {
@@ -16,8 +17,9 @@ class UserController extends Controller
      *
      * List all system users.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
+        $this->authorizeUserManager($request);
         $users = User::with('roleRelation')->orderBy('user_id')->get();
 
         return response()->json([
@@ -30,8 +32,9 @@ class UserController extends Controller
      *
      * Get a single user by user_id.
      */
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
+        $this->authorizeUserManager($request);
         $user = User::with('roleRelation')->findOrFail($id);
 
         return response()->json([
@@ -52,6 +55,7 @@ class UserController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        $this->authorizeUserManager($request);
         $validated = $request->validate([
             'firstName'     => ['required', 'string', 'max:50', "regex:/^[\\pL][\\pL .'-]*$/u"],
             'lastName'      => ['required', 'string', 'max:50', "regex:/^[\\pL][\\pL .'-]*$/u"],
@@ -59,7 +63,7 @@ class UserController extends Controller
             'password'      => 'required|string|min:6',
             'contactNumber' => ['required', 'string', 'regex:/^(?:\+63|63|0)9\d{9}$/'],
             'role'          => 'required|string',
-            'status'        => 'nullable|string|in:Active,Inactive',
+            'status'        => 'nullable|string|in:Active,Inactive,Suspended,Locked',
             'hospitalId'    => 'nullable|string',
         ]);
 
@@ -68,6 +72,7 @@ class UserController extends Controller
         if (! $role) {
             return response()->json(['message' => 'Invalid role specified.'], 422);
         }
+        $this->authorizeRoleManagement($request, $role->role_name);
 
         // Parse hospitalId: frontend sends "HOSP-001" format or empty string
         $hospitalId = null;
@@ -97,6 +102,7 @@ class UserController extends Controller
         ]);
 
         $user->load('roleRelation');
+        AuditLogger::record($request, 'Created user account', 'User Management', 'USR-' . str_pad((string) $user->user_id, 3, '0', STR_PAD_LEFT), null, ['role' => $user->role, 'email' => $user->email, 'status' => $user->status]);
 
         return response()->json([
             'user'    => $this->formatUser($user),
@@ -116,7 +122,10 @@ class UserController extends Controller
      */
     public function update(Request $request, int $id): JsonResponse
     {
+        $this->authorizeUserManager($request);
         $user = User::findOrFail($id);
+        $this->authorizeRoleManagement($request, $user->role);
+        $oldValues = ['role' => $user->role, 'email' => $user->email, 'status' => $user->status];
 
         $validated = $request->validate([
             'firstName'     => ['sometimes', 'required', 'string', 'max:50', "regex:/^[\\pL][\\pL .'-]*$/u"],
@@ -124,7 +133,7 @@ class UserController extends Controller
             'email'         => 'sometimes|required|email|max:100|unique:users,email,' . $user->user_id . ',user_id',
             'contactNumber' => ['sometimes', 'required', 'string', 'regex:/^(?:\+63|63|0)9\d{9}$/'],
             'role'          => 'sometimes|required|string',
-            'status'        => 'nullable|string|in:Active,Inactive',
+            'status'        => 'nullable|string|in:Active,Inactive,Suspended,Locked',
             'hospitalId'    => 'nullable|string',
         ]);
 
@@ -169,6 +178,7 @@ class UserController extends Controller
             if (! $role) {
                 return response()->json(['message' => 'Invalid role specified.'], 422);
             }
+            $this->authorizeRoleManagement($request, $role->role_name);
             $updates['role_id'] = $role->role_id;
             $effectiveRole = $role->role_name;
         }
@@ -178,7 +188,11 @@ class UserController extends Controller
         }
 
         $user->update($updates);
+        if (isset($updates['status']) && $updates['status'] !== 'Active') {
+            $user->tokens()->delete();
+        }
         $user->load('roleRelation');
+        AuditLogger::record($request, 'Updated user account', 'User Management', 'USR-' . str_pad((string) $user->user_id, 3, '0', STR_PAD_LEFT), $oldValues, ['role' => $user->role, 'email' => $user->email, 'status' => $user->status]);
 
         return response()->json([
             'user'    => $this->formatUser($user),
@@ -206,5 +220,19 @@ class UserController extends Controller
             'createdAt'     => $user->created_at?->toDateTimeString(),
             'updatedAt'     => $user->updated_at?->toDateTimeString(),
         ];
+    }
+
+    private function authorizeUserManager(Request $request): void
+    {
+        abort_unless(in_array($request->user()->role, ['Super Admin', 'Administrator'], true), 403, 'Administrator access is required.');
+    }
+
+    private function authorizeRoleManagement(Request $request, ?string $role): void
+    {
+        if ($request->user()->role === 'Super Admin') {
+            return;
+        }
+
+        abort_unless(! in_array($role, ['Super Admin', 'Administrator'], true), 403, 'Only Super Administrators can manage Administrator or Super Admin accounts.');
     }
 }

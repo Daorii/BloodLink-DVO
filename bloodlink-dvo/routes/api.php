@@ -12,6 +12,7 @@ use App\Http\Controllers\DonorRecallController;
 use App\Http\Controllers\LabTestResultController;
 use App\Http\Controllers\MLForecastController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\SuperAdminSecurityController;
 use App\Http\Controllers\WalkinIssuanceController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -47,6 +48,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/users/{id}', [UserController::class, 'show']);
     Route::post('/users', [UserController::class, 'store']);
     Route::put('/users/{id}', [UserController::class, 'update']);
+
+    // Super Administrator security controls
+    Route::get('/super-admin/security-overview', [SuperAdminSecurityController::class, 'overview']);
+    Route::get('/super-admin/audit-logs', [SuperAdminSecurityController::class, 'auditLogs']);
+    Route::post('/super-admin/users/{id}/revoke-sessions', [SuperAdminSecurityController::class, 'revokeSessions']);
 
     // Hospital Management (CRUD)
     Route::get('/hospitals', [HospitalController::class, 'index']);

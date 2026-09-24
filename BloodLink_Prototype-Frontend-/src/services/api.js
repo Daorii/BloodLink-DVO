@@ -258,6 +258,24 @@ export async function apiGetDonationBySerial(serialNumber) {
   return request(`/donations/by-serial/${encodeURIComponent(serialNumber)}`);
 }
 
+// ─── Super Admin security endpoints ───────────────────────────────────────
+export async function apiGetSecurityOverview() {
+  return request('/super-admin/security-overview');
+}
+
+export async function apiGetAuditLogs(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.perPage) params.set('per_page', String(filters.perPage));
+  if (filters.module && filters.module !== 'All') params.set('module', filters.module);
+  if (filters.search) params.set('search', filters.search);
+  const suffix = params.toString() ? `?${params}` : '';
+  return request(`/super-admin/audit-logs${suffix}`);
+}
+
+export async function apiRevokeUserSessions(id) {
+  return request(`/super-admin/users/${id}/revoke-sessions`, { method: 'POST' });
+}
+
 // ─── Donor Recall endpoints ────────────────────────────────────────────────
 
 export async function apiGetRecalls() {

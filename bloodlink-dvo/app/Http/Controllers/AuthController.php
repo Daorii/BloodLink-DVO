@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use App\Services\AuditLogger;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -45,6 +46,7 @@ class AuthController extends Controller
 
         // Load the role relationship for the response
         $user->load('roleRelation');
+        AuditLogger::record($request, 'Signed in', 'Authentication', 'USR-' . str_pad((string) $user->user_id, 3, '0', STR_PAD_LEFT), null, null, $user);
 
         return response()->json([
             'user'  => $this->formatUser($user),
@@ -59,6 +61,7 @@ class AuthController extends Controller
      */
     public function logout(Request $request): JsonResponse
     {
+        AuditLogger::record($request, 'Signed out', 'Authentication', 'USR-' . str_pad((string) $request->user()->user_id, 3, '0', STR_PAD_LEFT));
         $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Logged out successfully.']);

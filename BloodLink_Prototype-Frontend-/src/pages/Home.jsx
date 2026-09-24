@@ -502,7 +502,9 @@ export default function Home() {
 
     setShowModal(false);
     const r = authenticatedUser.role;
-    if (r === 'Super Admin' || r === 'Administrator') {
+    if (r === 'Super Admin') {
+      navigate('/superadmin/dashboard');
+    } else if (r === 'Administrator') {
       navigate('/admin/dashboard');
     } else if (r === 'Registry Staff') {
       navigate('/registry/dashboard');
