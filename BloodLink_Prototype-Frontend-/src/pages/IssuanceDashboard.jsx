@@ -115,6 +115,7 @@ export default function IssuanceDashboard() {
   const [fcWeeks,           setFcWeeks]           = useState(4);
   const [fcLoading,         setFcLoading]         = useState(false);
   const [chartClickedPoint, setChartClickedPoint] = useState(null);
+  const [showAllGapRows,    setShowAllGapRows]    = useState(false);
 
   const BLOOD_TYPE_LIST = ['O+','O-','A+','A-','B+','B-','AB+','AB-'];
   const COMP_LIST = ['PRBC','Platelet Concentrate','FFP','Cryoprecipitate','Cryosupernate'];
@@ -2521,18 +2522,20 @@ export default function IssuanceDashboard() {
                       const shortfalls  = gapRows.filter(r => r.status === 'Shortfall').length;
                       const lowBuffers  = gapRows.filter(r => r.status === 'Low Buffer').length;
                       const sufficients = gapRows.filter(r => r.status === 'Sufficient').length;
+                      const visibleGapRows = showAllGapRows ? gapRows : gapRows.slice(0, 6);
 
                       return (
                         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
                           <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                             <div>
-                              <h3 className="font-bold text-slate-900 text-sm tracking-tight">⚖️ Demand vs Inventory Gap Analysis</h3>
+                              <h3 className="font-bold text-slate-900 text-sm tracking-tight"> Demand vs Inventory Gap Analysis</h3>
                               <p className="text-xs text-slate-500 mt-0.5">Next-week predicted demand vs current available stock — helps identify shortfalls before they happen</p>
                             </div>
                             <div className="flex items-center gap-3 text-[10px] font-bold flex-shrink-0">
                               {shortfalls > 0 && <span className="bg-rose-100 text-rose-700 border border-rose-200 px-2 py-1 rounded-full">{shortfalls} Shortfall{shortfalls > 1 ? 's' : ''}</span>}
                               {lowBuffers > 0 && <span className="bg-amber-100 text-amber-700 border border-amber-200 px-2 py-1 rounded-full">{lowBuffers} Low Buffer</span>}
                               {sufficients > 0 && <span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-full">{sufficients} Sufficient</span>}
+                              {gapRows.length > 6 && <button type="button" onClick={() => setShowAllGapRows(value => !value)} className="ml-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-600 transition hover:bg-slate-50">{showAllGapRows ? 'Show priority view' : `View all ${gapRows.length}`}</button>}
                             </div>
                           </div>
 
@@ -2551,7 +2554,7 @@ export default function IssuanceDashboard() {
                                 <span className="col-span-2 text-right">Gap</span>
                                 <span className="col-span-1 text-right">Status</span>
                               </div>
-                              {gapRows.map(({ bt, comp, demand, avail, gap, status }) => {
+                              {visibleGapRows.map(({ bt, comp, demand, avail, gap, status }) => {
                                 const isShortfall  = status === 'Shortfall';
                                 const isLowBuffer  = status === 'Low Buffer';
                                 const rowBg  = isShortfall ? 'bg-rose-50/60 hover:bg-rose-50' : isLowBuffer ? 'bg-amber-50/40 hover:bg-amber-50' : 'hover:bg-slate-50';
@@ -2586,6 +2589,10 @@ export default function IssuanceDashboard() {
                                 );
                               })}
                             </div>
+                          )}
+
+                          {!showAllGapRows && gapRows.length > visibleGapRows.length && (
+                            <div className="border-t border-slate-100 bg-slate-50 px-6 py-2.5 text-center text-[11px] font-medium text-slate-500">Showing the {visibleGapRows.length} highest-priority combinations. <button type="button" onClick={() => setShowAllGapRows(true)} className="font-bold text-indigo-700 hover:text-indigo-900">View all {gapRows.length} rows</button></div>
                           )}
 
                           {shortfalls > 0 && (
