@@ -185,6 +185,13 @@
   margin-left: 72px;
 }
 
+/* Shared staff-portal header: a fixed visual baseline across every workspace. */
+.portal-topbar {
+  height: 64px;
+  min-height: 64px;
+  flex-shrink: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sidebar,
   .content-area,

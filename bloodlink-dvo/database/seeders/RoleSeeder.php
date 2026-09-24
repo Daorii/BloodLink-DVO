@@ -17,9 +17,10 @@ class RoleSeeder extends Seeder
             ['role_id' => 1, 'role_name' => 'Super Admin'],
             ['role_id' => 2, 'role_name' => 'Administrator'],
             ['role_id' => 3, 'role_name' => 'Registry Staff'],
-            ['role_id' => 4, 'role_name' => 'Blood Bank Staff'],
             ['role_id' => 5, 'role_name' => 'Issuance Personnel'],
             ['role_id' => 6, 'role_name' => 'Hospital User'],
+            ['role_id' => 7, 'role_name' => 'Serology Staff'],
+            ['role_id' => 8, 'role_name' => 'Production Staff'],
         ];
 
         foreach ($roles as $role) {

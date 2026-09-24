@@ -502,7 +502,7 @@ export default function RegistryDashboard() {
                   <img src={bloodlinkLogo} alt="BloodLink" className="h-10 w-auto object-contain flex-shrink-0" />
                   <div className="sidebar-brand-copy min-w-0">
                     <p className="font-bold text-sm text-slate-900 tracking-tight leading-tight">BloodLink</p>
-                    <p className="text-slate-500 text-[10px] font-bold">Registry Portal</p>
+                    <p className="text-slate-500 text-[10px] font-bold">Donor Management Unit</p>
                   </div>
                 </div>
                 {!isSidebarCollapsed && (
@@ -535,7 +535,7 @@ export default function RegistryDashboard() {
               <div className="mx-4 mt-4 mb-2 bg-slate-50 border border-slate-200/60 rounded-lg p-3">
                 <div className="sidebar-desk">
                   <p className="text-slate-400 text-[9px] uppercase font-bold tracking-wider mb-0.5">Role Desk</p>
-                  <p className="text-slate-800 font-bold text-xs">Registry Staff</p>
+                  <p className="text-slate-800 font-bold text-xs">DMU Staff</p>
                   <p className="text-slate-500 text-[10px] font-medium">SNBC Operations</p>
                 </div>
               </div>
@@ -548,10 +548,10 @@ export default function RegistryDashboard() {
               <button
                 onClick={() => setTab('registry')}
                 className={`w-full text-left nav-link ${tab === 'registry' ? 'active' : ''}`}
-                title={isSidebarCollapsed ? "Donor Registry" : ""}
+                title={isSidebarCollapsed ? "Donor Management" : ""}
               >
                 <Users className="nav-icon" />
-                <span className="sidebar-copy">Donor Registry</span>
+                <span className="sidebar-copy">Donor Management</span>
               </button>
 
               <button
@@ -593,24 +593,24 @@ export default function RegistryDashboard() {
       <div className={`content-area flex flex-col flex-1 h-screen bg-slate-50 print:hidden ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
 
         {/* Top Header Bar */}
-        <header className="sticky top-0 z-20 bg-white border-b border-slate-200 h-16 flex items-center justify-between px-8 print:hidden">
+        <header className="portal-topbar sticky top-0 z-20 bg-white border-b border-slate-200 flex items-center justify-between px-8 print:hidden">
           <div>
             <h2 className="text-slate-900 font-bold text-sm leading-tight">
-              {tab === 'registry' ? 'Donor Database Registry' : tab === 'recall' ? 'SMS Recall Operations' : 'Laboratory Serology Results (Section II)'}
+              {tab === 'registry' ? 'Donor Management Unit' : tab === 'recall' ? 'SMS Recall Operations' : 'Laboratory Serology Results (Section II)'}
             </h2>
             <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5 tracking-wider">
-              {tab === 'registry' ? 'Manage registered donor logs and statuses' : tab === 'recall' ? 'Targeted dispatch for critical shortages' : 'Record and manage lab-confirmed serology & TTI screening results (Serology Staff workspace)'}
+              {tab === 'registry' ? 'Manage donor profiles, registration records, and statuses' : tab === 'recall' ? 'Targeted dispatch for critical shortages' : 'Record and manage lab-confirmed serology & TTI screening results (Serology Staff workspace)'}
             </p>
           </div>
 
           <div className="flex items-center gap-3">
 
             <div className="text-right">
-              <p className="text-xs font-bold text-slate-900">Registrar Desk</p>
-              <p className="text-[10px] text-slate-400">Bajada HQ, Davao City</p>
+              <p className="text-xs font-bold text-slate-900">{authSystemUser?.name || 'DMU Staff'}</p>
+              <p className="text-[10px] text-slate-400">{authSystemUser?.role === 'Registry Staff' ? 'DMU Staff' : authSystemUser?.role || 'DMU Staff'}</p>
             </div>
             <span className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs">
-              RG
+              {(authSystemUser?.name || 'DMU Staff').split(' ').map(word => word[0]).join('').slice(0, 2).toUpperCase()}
             </span>
           </div>
         </header>

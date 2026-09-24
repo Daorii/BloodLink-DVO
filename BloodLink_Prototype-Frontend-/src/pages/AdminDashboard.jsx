@@ -898,7 +898,7 @@ export default function AdminDashboard() {
       <div className={`content-area bg-slate-50/50 ${sidebarCollapsed ? 'is-collapsed' : ''}`}>
 
         {/* Top Header Bar */}
-        <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between sticky top-0 z-20">
+        <header className="portal-topbar bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-20">
           <div>
             <h1 className="text-base font-bold text-slate-900 tracking-tight">{tabTitles[tab]}</h1>
             <p className="text-xs text-slate-400 font-medium">{tabSubs[tab]}</p>
@@ -1630,8 +1630,7 @@ export default function AdminDashboard() {
                         </motion.button>
 
                         {[
-                          { label: 'Registry', role: 'Registry Staff', roleId: 'ROLE-003' },
-                          { label: 'Blood Bank', role: 'Blood Bank Staff', roleId: 'ROLE-004' },
+                          { label: 'DMU', role: 'Registry Staff', roleId: 'ROLE-003' },
                           { label: 'Issuance', role: 'Issuance Personnel', roleId: 'ROLE-005' },
                           { label: 'Serology', role: 'Serology Staff', roleId: 'ROLE-007' },
                           { label: 'Production', role: 'Production Staff', roleId: 'ROLE-008' },
@@ -1685,8 +1684,9 @@ export default function AdminDashboard() {
                           'Super Admin': 'bg-purple-50 border-purple-200 text-purple-700',
                           'Administrator': 'bg-blue-50 border-blue-200 text-blue-700',
                           'Registry Staff': 'bg-emerald-50 border-emerald-200 text-emerald-700',
-                          'Blood Bank Staff': 'bg-orange-50 border-orange-200 text-orange-700',
                           'Issuance Personnel': 'bg-amber-50 border-amber-200 text-amber-700',
+                          'Serology Staff': 'bg-cyan-50 border-cyan-200 text-cyan-700',
+                          'Production Staff': 'bg-violet-50 border-violet-200 text-violet-700',
                           'Hospital User': 'bg-slate-50 border-slate-200 text-slate-600',
                         };
                         const roleCls = roleColors[u.role] || 'bg-slate-50 border-slate-200 text-slate-600';
@@ -1698,7 +1698,7 @@ export default function AdminDashboard() {
                             <td className="px-6 py-4 font-bold text-slate-900">{u.name}</td>
                             <td className="px-6 py-4">
                               <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${roleCls}`}>
-                                {u.role}
+                                {u.role === 'Registry Staff' ? 'DMU Staff' : u.role}
                               </span>
                             </td>
                             <td className="px-6 py-4 text-slate-500 font-mono">{u.email}</td>
@@ -4129,7 +4129,7 @@ export default function AdminDashboard() {
             <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-purple-50 to-white rounded-t-2xl">
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Administrative Tool · Table 2: Users</p>
               <h4 className="font-bold text-slate-900 text-sm tracking-tight">
-                Register New {addUserForm.role === 'Registry Staff' ? 'Registry' : addUserForm.role === 'Blood Bank Staff' ? 'Blood Bank' : addUserForm.role === 'Issuance Personnel' ? 'Issuance' : addUserForm.role === 'Hospital User' ? 'Hospital' : addUserForm.role === 'Administrator' ? 'Admin' : 'Super Admin'}
+                Register New {addUserForm.role === 'Registry Staff' ? 'DMU' : addUserForm.role === 'Issuance Personnel' ? 'Issuance' : addUserForm.role === 'Hospital User' ? 'Hospital' : addUserForm.role === 'Serology Staff' ? 'Serology' : addUserForm.role === 'Production Staff' ? 'Production' : addUserForm.role === 'Administrator' ? 'Admin' : 'Super Admin'}
               </h4>
             </div>
             <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
@@ -4320,14 +4320,13 @@ export default function AdminDashboard() {
                   <select
                     value={editUserForm.role}
                     onChange={e => {
-                      const roleMap = { 'Super Admin': 'ROLE-001', 'Administrator': 'ROLE-002', 'Registry Staff': 'ROLE-003', 'Blood Bank Staff': 'ROLE-004', 'Issuance Personnel': 'ROLE-005', 'Hospital User': 'ROLE-006', 'Serology Staff': 'ROLE-007', 'Production Staff': 'ROLE-008' };
+                      const roleMap = { 'Super Admin': 'ROLE-001', 'Administrator': 'ROLE-002', 'Registry Staff': 'ROLE-003', 'Issuance Personnel': 'ROLE-005', 'Hospital User': 'ROLE-006', 'Serology Staff': 'ROLE-007', 'Production Staff': 'ROLE-008' };
                       setEditUserForm(f => ({ ...f, role: e.target.value, roleId: roleMap[e.target.value] || 'ROLE-003' }));
                     }}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs bg-slate-50/50 outline-none focus:border-slate-800"
                     disabled={editingUser.role === 'Super Admin' && !isSuperAdmin}
                   >
-                    <option>Registry Staff</option>
-                    <option>Blood Bank Staff</option>
+                    <option value="Registry Staff">DMU Staff</option>
                     <option>Issuance Personnel</option>
                     <option>Serology Staff</option>
                     <option>Production Staff</option>

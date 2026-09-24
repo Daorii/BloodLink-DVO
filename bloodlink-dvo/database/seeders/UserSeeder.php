@@ -59,17 +59,6 @@ class UserSeeder extends Seeder
                 'status'         => 'Active',
             ],
             [
-                'role_id'        => 4, // Blood Bank Staff
-                'hospital_id'    => null,
-                'first_name'     => 'RMT Mark',
-                'middle_name'    => null,
-                'last_name'      => 'Lopez',
-                'email'          => 'bloodbank@bloodlink.dvo',
-                'password'       => $defaultPassword,
-                'contact_number' => null,
-                'status'         => 'Active',
-            ],
-            [
                 'role_id'        => 5, // Issuance Personnel
                 'hospital_id'    => null,
                 'first_name'     => 'SNBC Issuance',
@@ -87,6 +76,28 @@ class UserSeeder extends Seeder
                 'middle_name'    => null,
                 'last_name'      => 'Santos',
                 'email'          => 'hospital@bloodlink.dvo',
+                'password'       => $defaultPassword,
+                'contact_number' => null,
+                'status'         => 'Active',
+            ],
+            [
+                'role_id'        => 7, // Serology Staff
+                'hospital_id'    => null,
+                'first_name'     => 'Dr. Clara',
+                'middle_name'    => null,
+                'last_name'      => 'Santos',
+                'email'          => 'serology@bloodlink.dvo',
+                'password'       => $defaultPassword,
+                'contact_number' => null,
+                'status'         => 'Active',
+            ],
+            [
+                'role_id'        => 8, // Production Staff
+                'hospital_id'    => null,
+                'first_name'     => 'Engr. Miguel',
+                'middle_name'    => null,
+                'last_name'      => 'Reyes',
+                'email'          => 'production@bloodlink.dvo',
                 'password'       => $defaultPassword,
                 'contact_number' => null,
                 'status'         => 'Active',

@@ -364,7 +364,7 @@ export default function IssuanceDashboard() {
     setSuccessModal({
       isOpen: true,
       title: 'Requisition Verified!',
-      message: `Blood Request ${refNo} has been successfully verified and forwarded to the Blood Bank for physical preparation.`
+      message: `Blood Request ${refNo} has been successfully verified and is ready for physical preparation.`
     });
   };
 
@@ -372,7 +372,7 @@ export default function IssuanceDashboard() {
     // Look up the matching issuance record from bloodIssuances by requestId
     const issuance = (bloodIssuances || []).find(i => i.requestId === req.requestId);
     if (!issuance) {
-      alert('No issuance record found for this request. The Blood Bank may not have processed it yet.');
+      alert('No issuance record was found for this request. It may not have been prepared yet.');
       return;
     }
     const result = await approveBloodRelease({ issuanceId: issuance.issuanceId, remarks: '' });
@@ -470,7 +470,7 @@ export default function IssuanceDashboard() {
       isOpen: true,
       title: isIssuanceStaff ? 'Requisition Filed!' : 'Request Submitted!',
       message: isIssuanceStaff 
-        ? `Blood Requisition ${refNo} has been successfully filed on behalf of ${submittingHospitalName} and is marked as Verified (ready for Blood Bank).`
+        ? `Blood Requisition ${refNo} has been successfully filed on behalf of ${submittingHospitalName} and is marked as Verified (ready for preparation).`
         : `Your blood requisition ${refNo} has been successfully submitted and is awaiting verification by the Issuance Personnel.`
     });
   };
@@ -662,7 +662,7 @@ export default function IssuanceDashboard() {
       {/* CONTENT AREA */}
       <div className={`content-area flex flex-col flex-1 h-screen bg-slate-50 ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
 
-        <header className="sticky top-0 z-20 bg-white border-b border-slate-200 h-16 flex items-center justify-between px-8">
+        <header className="portal-topbar sticky top-0 z-20 bg-white border-b border-slate-200 flex items-center justify-between px-8">
           <div>
             <h2 className="text-slate-900 font-bold text-sm leading-tight">
               {isHospitalUser ? 'Blood Request Portal' : activeTab === 'inventory' ? 'Component Inventory' : activeTab === 'issuance_details' ? 'Issuance Audit Log' : activeTab === 'distribution' ? 'Distribution Recommendation' : activeTab === 'forecast' ? 'Demand Forecasting' : 'Issuance Requests'}
@@ -728,7 +728,7 @@ export default function IssuanceDashboard() {
             <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Ready for Release</p>
               <p className="text-2xl font-extrabold text-blue-600 font-mono">{readyForReleaseCount}</p>
-              <p className="text-[10px] text-slate-450 mt-1 font-semibold">Blood Bank prepared — approve release</p>
+              <p className="text-[10px] text-slate-450 mt-1 font-semibold">Prepared for release — approve release</p>
             </div>
             <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Released</p>
@@ -1854,7 +1854,7 @@ export default function IssuanceDashboard() {
                       ) : (
                         <tr>
                           <td colSpan={9} className="px-6 py-10 text-center text-slate-400 font-normal">
-                            No issuance records yet. Records appear here once the Blood Bank processes a request.
+                            No issuance records yet. Records appear here once a request is prepared for release.
                           </td>
                         </tr>
                       )}
@@ -3153,7 +3153,7 @@ export default function IssuanceDashboard() {
                   <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 rounded-lg p-3">
                     <AlertTriangle className="w-4 h-4 text-[#C21C24] flex-shrink-0 mt-0.5" />
                     <p className="text-xs text-[#C21C24] font-semibold leading-relaxed">
-                      This request is marked <strong>URGENT</strong>. It will be prioritized and flagged for immediate Blood Bank Staff attention.
+                      This request is marked <strong>URGENT</strong>. It will be prioritized for immediate issuance attention.
                     </p>
                   </div>
                 )}

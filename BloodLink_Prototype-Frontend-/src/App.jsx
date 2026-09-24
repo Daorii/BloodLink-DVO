@@ -1,6 +1,9 @@
 import React from 'react';
-import { HashRouter as Router, Routes, Route } from 'react-router-dom';
+import { HashRouter as Router, Navigate, Routes, Route } from 'react-router-dom';
+import { useBloodStore } from './store/useBloodStore';
+import { getToken } from './services/api';
 import Home from './pages/Home';
+import Login from './pages/Login';
 import DonorRegister from './pages/DonorRegister';
 import DonorDashboard from './pages/DonorDashboard';
 import DonorNotification from './pages/DonorNotification';
@@ -8,7 +11,6 @@ import DonorConfirm from './pages/DonorConfirm';
 import AdminDashboard from './pages/AdminDashboard';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import RegistryDashboard from './pages/RegistryDashboard';
-import BloodBankDashboard from './pages/BloodBankDashboard';
 import IssuanceDashboard from './pages/IssuanceDashboard';
 import SerologyDashboard from './pages/SerologyDashboard';
 import ProductionDashboard from './pages/ProductionDashboard';
@@ -32,18 +34,25 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/login" element={<Login />} />
         <Route path="/donor/register" element={<DonorRegister />} />
         <Route path="/donor/dashboard" element={<DonorDashboard />} />
         <Route path="/donor/notification" element={<DonorNotification />} />
         <Route path="/donor/confirm" element={<DonorConfirm />} />
-        <Route path="/admin/dashboard" element={<AdminDashboard />} />
-        <Route path="/superadmin/dashboard" element={<SuperAdminDashboard />} />
-        <Route path="/registry/dashboard" element={<RegistryDashboard />} />
-        <Route path="/bloodbank/dashboard" element={<BloodBankDashboard />} />
-        <Route path="/issuance/dashboard" element={<IssuanceDashboard />} />
-        <Route path="/serology/dashboard" element={<SerologyDashboard />} />
-        <Route path="/production/dashboard" element={<ProductionDashboard />} />
+        <Route path="/admin/dashboard" element={<RequireSystemUser roles={['Administrator']}><AdminDashboard /></RequireSystemUser>} />
+        <Route path="/superadmin/dashboard" element={<RequireSystemUser roles={['Super Admin']}><SuperAdminDashboard /></RequireSystemUser>} />
+        <Route path="/registry/dashboard" element={<RequireSystemUser roles={['Registry Staff']}><RegistryDashboard /></RequireSystemUser>} />
+        <Route path="/issuance/dashboard" element={<RequireSystemUser roles={['Issuance Personnel', 'Hospital User']}><IssuanceDashboard /></RequireSystemUser>} />
+        <Route path="/serology/dashboard" element={<RequireSystemUser roles={['Serology Staff']}><SerologyDashboard /></RequireSystemUser>} />
+        <Route path="/production/dashboard" element={<RequireSystemUser roles={['Production Staff']}><ProductionDashboard /></RequireSystemUser>} />
       </Routes>
     </Router>
   );
+}
+
+function RequireSystemUser({ roles, children }) {
+  const user = useBloodStore((state) => state.authSystemUser);
+  if (!user || !getToken()) return <Navigate to="/login" replace />;
+  if (roles && !roles.includes(user.role)) return <Navigate to="/login" replace />;
+  return children;
 }

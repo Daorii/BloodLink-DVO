@@ -34,7 +34,7 @@ const CARDS_DATA = [
     step: '05'
   },
   {
-    title: 'Donor Registry',
+    title: 'Donor Management Unit',
     desc: 'Searchable Davao City donor database with full profile management.',
     icon: Search,
     step: '06'

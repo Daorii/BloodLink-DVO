@@ -2,9 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useBloodStore } from '../store/useBloodStore';
 import {
   FlaskConical, Package, Hash, CheckCircle, AlertTriangle, Plus, X,
-  Search, RefreshCw, LogOut, Clock, Activity, Eye, ChevronLeft,
+  Search, LogOut, Clock, Activity, Eye, ChevronLeft,
   ChevronRight, ChevronsLeft, ChevronsRight, Droplets, Thermometer,
-  ClipboardCheck, Archive, Filter
+  Archive, Filter
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
@@ -383,45 +383,44 @@ export default function ProductionDashboard() {
   const totalPages  = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
   const pageStart   = (currentPage - 1) * ITEMS_PER_PAGE;
   const paged       = filtered.slice(pageStart, pageStart + ITEMS_PER_PAGE);
+  const signedInUser = authSystemUser || { name: 'Production Staff', role: 'Production Staff' };
+  const userInitials = (signedInUser.name || 'PS').split(' ').map(word => word[0]).join('').slice(0, 2).toUpperCase();
 
-  const currentUser = authSystemUser || { name: 'Production Staff', role: 'Production Staff' };
-  const initials = (currentUser.name || 'PS').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   return (
-    <div className="flex h-screen bg-slate-50 font-sans text-slate-800 overflow-hidden antialiased">
+    <div className="flex min-h-screen bg-slate-50 font-sans text-slate-800 antialiased">
 
       {/* ── Sidebar ── */}
-      <aside className={`bg-white border-r border-slate-200 flex flex-col justify-between transition-all duration-300 z-30 flex-shrink-0 ${isSidebarCollapsed ? 'w-20' : 'w-64'}`}>
-        <div>
-          <div className={`py-4 border-b border-slate-100 flex items-center justify-between ${isSidebarCollapsed ? 'px-3' : 'px-5'}`}>
+      <aside className={`sidebar flex flex-col justify-between border-r border-slate-200 bg-white ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
+        <div className="sidebar-inner w-full flex flex-col justify-between">
+          <div>
+          <div className={`py-5 border-b border-slate-100 flex items-center justify-between ${isSidebarCollapsed ? 'px-3' : 'px-6'}`}>
             <div className="flex items-center gap-3 overflow-hidden">
-              <img src={bloodlinkLogo} alt="BloodLink" className="h-9 w-auto object-contain flex-shrink-0" />
-              {!isSidebarCollapsed && (
-                <div className="truncate">
+              <img src={bloodlinkLogo} alt="BloodLink" className="h-10 w-auto object-contain flex-shrink-0" />
+                <div className="sidebar-brand-copy min-w-0">
                   <h1 className="font-bold text-sm text-slate-900 tracking-tight leading-tight">BloodLink</h1>
-                  <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Production Portal</p>
+                  <p className="text-slate-500 text-[10px] font-bold">Production Portal</p>
                 </div>
-              )}
             </div>
-            <button onClick={toggleSidebar} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
-              {isSidebarCollapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
-            </button>
+            {!isSidebarCollapsed && <button onClick={toggleSidebar} className="text-slate-450 hover:text-slate-800 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"><ChevronsLeft size={18} /></button>}
           </div>
+          {isSidebarCollapsed && <div className="flex justify-center mt-2"><button onClick={toggleSidebar} className="text-slate-450 hover:text-slate-800 p-1.5 rounded-lg hover:bg-slate-100 transition-colors" title="Expand sidebar"><ChevronsRight size={18} /></button></div>}
           {!isSidebarCollapsed && (
-            <div className="p-4 bg-slate-50 border-b border-slate-100">
+            <div className="mx-4 mt-4 mb-2 bg-slate-50 border border-slate-200/60 rounded-lg p-3">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 font-bold text-xs flex items-center justify-center border border-emerald-200">{initials}</div>
-                <div className="truncate">
-                  <p className="text-xs font-bold text-slate-900">{currentUser.name}</p>
-                  <span className="inline-block px-2 py-0.5 rounded text-[9px] font-extrabold bg-emerald-100 text-emerald-700 uppercase mt-0.5 border border-emerald-200/60">{currentUser.role}</span>
+                <div className="sidebar-desk">
+                  <p className="text-slate-400 text-[9px] uppercase font-bold tracking-wider mb-0.5">Role Desk</p>
+                  <p className="text-xs font-bold text-slate-900">Production Staff</p>
+                  <p className="text-slate-500 text-[10px] font-medium">Production Staff · SNBC Operations</p>
                 </div>
               </div>
             </div>
           )}
-          <nav className="p-3 space-y-1">
-            <div className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60 shadow-xs">
-              <Package className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-              {!isSidebarCollapsed && <span>Component Processing</span>}
+          <nav className="flex-1 py-2 overflow-y-auto">
+            <p className="sidebar-section-label text-slate-400 text-[9px] font-bold uppercase px-4 mt-3 mb-1 tracking-widest">Main Modules</p>
+            <div className="nav-link active">
+              <Package className="nav-icon" />
+              <span className="sidebar-copy">Component Processing</span>
             </div>
             {pendingToProcess.length > 0 && !isSidebarCollapsed && (
               <div className="mx-2 mt-1 flex items-center gap-1.5 text-[10px] font-bold text-amber-600">
@@ -432,28 +431,24 @@ export default function ProductionDashboard() {
           </nav>
         </div>
         <div className="p-4 border-t border-slate-100">
-          <Link to="/" className="flex items-center gap-2.5 text-xs font-bold text-slate-500 hover:text-slate-900 transition-colors">
-            <LogOut className="w-4 h-4 text-slate-400" />
-            {!isSidebarCollapsed && <span>Exit Portal</span>}
+          <Link to="/" className="w-full inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-full transition-colors">
+            <LogOut className="w-4 h-4 flex-shrink-0" />
+            <span className="sidebar-copy">Exit Dashboard</span>
           </Link>
+        </div>
         </div>
       </aside>
 
       {/* ── Main ── */}
-      <main className="flex-1 flex flex-col overflow-y-auto">
-        <header className="sticky top-0 z-20 bg-white border-b border-slate-200 h-16 flex items-center justify-between px-8 shadow-xs">
+      <main className={`content-area flex flex-col min-w-0 bg-slate-50 ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
+        <header className="portal-topbar sticky top-0 z-20 bg-white border-b border-slate-200 flex items-center justify-between px-8">
           <div>
-            <h2 className="text-slate-900 font-bold text-base leading-tight tracking-tight">Blood Component Processing & Inventory Entry</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Separate, label, and record blood components from Serology-cleared donations</p>
+            <h2 className="text-slate-900 font-bold text-sm leading-tight">Blood Component Processing & Inventory Entry</h2>
+            <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5 tracking-wider">Separate, label, and record blood components from Serology-cleared donations</p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-full flex items-center gap-1.5">
-              <ClipboardCheck className="w-3.5 h-3.5" /> DOH NVBSP Compliant
-            </span>
-            <button onClick={() => { fetchBloodInventoryFromAPI(); fetchDonationsFromAPI(); fetchLabResultsFromAPI(); }}
-              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 transition-colors cursor-pointer" title="Refresh">
-              <RefreshCw className="w-4 h-4" />
-            </button>
+            <div className="text-right"><p className="text-xs font-bold text-slate-900">{signedInUser.name}</p><p className="text-[10px] text-slate-400">{signedInUser.role}</p></div>
+            <span className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs">{userInitials}</span>
           </div>
         </header>
 

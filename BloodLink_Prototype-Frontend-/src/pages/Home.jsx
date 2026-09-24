@@ -474,8 +474,6 @@ export default function Home() {
       setEmail('serology@bloodlink.dvo');
     } else if (role === 'production') {
       setEmail('production@bloodlink.dvo');
-    } else if (role === 'bloodbank') {
-      setEmail('bloodbank@bloodlink.dvo');
     } else if (role === 'issuance') {
       setEmail('issuance@bloodlink.dvo');
     } else if (role === 'hospital') {
@@ -510,8 +508,6 @@ export default function Home() {
       navigate('/registry/dashboard');
     } else if (r === 'Serology Staff') {
       navigate('/serology/dashboard');
-    } else if (r === 'Blood Bank Staff') {
-      navigate('/bloodbank/dashboard');
     } else if (r === 'Production Staff') {
       navigate('/production/dashboard');
     } else if (r === 'Issuance Personnel' || r === 'Hospital User') {
@@ -560,7 +556,7 @@ export default function Home() {
               </button>
               <span className="w-px h-6 bg-slate-200" />
               {/* Main Portal Access Logos */}
-              <button onClick={() => setShowModal(true)} className="flex items-center gap-2 group focus:outline-none cursor-pointer" title="Access BloodLink DVO Portal">
+              <button onClick={() => navigate('/login')} className="flex items-center gap-2 group focus:outline-none cursor-pointer" title="Access BloodLink DVO Portal">
                 <img src={bloodlinkLogo} alt="BloodLink" className="h-14 w-auto object-contain group-hover:opacity-80 transition-opacity" />
                 <img src={davaoLogo} alt="Davao" className="h-12 w-auto object-contain group-hover:opacity-80 transition-opacity" />
               </button>
@@ -672,7 +668,7 @@ export default function Home() {
                 <span className="text-[9px] font-bold text-slate-400 group-hover:text-blue-700 transition-colors tracking-widest">PRC</span>
               </button>
               <div className="h-6 w-px bg-slate-200 mx-1" />
-              <button onClick={() => setShowModal(true)}
+              <button onClick={() => navigate('/login')}
                 className="flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors cursor-pointer focus:outline-none"
                 title="Portal Login">
                 <User className="w-6 h-6" />
@@ -728,7 +724,6 @@ export default function Home() {
                     { id: 'superadmin', label: 'Super Admin' },
                     { id: 'admin', label: 'Admin' },
                     { id: 'registry', label: 'Registry' },
-                    { id: 'bloodbank', label: 'Blood Bank' },
                     { id: 'issuance', label: 'Issuance' },
                     { id: 'hospital', label: 'Hospital' },
                     { id: 'production', label: 'Production' },
@@ -758,7 +753,6 @@ export default function Home() {
                   <li>Registry Staff: <code className="font-mono text-slate-700">registry@bloodlink.dvo</code></li>
                   <li>Serology Staff: <code className="font-mono text-slate-700">serology@bloodlink.dvo</code></li>
                   <li>Production Staff: <code className="font-mono text-slate-700">production@bloodlink.dvo</code></li>
-                  <li>Blood Bank Staff: <code className="font-mono text-slate-700">bloodbank@bloodlink.dvo</code></li>
                   <li>Issuance Personnel: <code className="font-mono text-slate-700">issuance@bloodlink.dvo</code></li>
                   <li>Hospital Desk: <code className="font-mono text-slate-700">hospital@bloodlink.dvo</code> (SPMC)</li>
                 </ul>
@@ -821,7 +815,7 @@ export default function Home() {
         image={snbc1}
         imageAlt="National Blood Center Mindanao, Davao City"
         title="BLOODLINK"
-        onLogin={() => setShowModal(true)}
+        onLogin={() => navigate('/login')}
       />
 
 

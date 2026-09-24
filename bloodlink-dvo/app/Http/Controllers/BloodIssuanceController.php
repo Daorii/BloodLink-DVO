@@ -33,7 +33,7 @@ class BloodIssuanceController extends Controller
 
     /**
      * POST /api/blood-issuances
-     * Blood Bank Staff processes a request:
+     * Issuance Personnel prepares a request:
      *   - Creates a blood_issuance + items
      *   - Updates blood_request status to "Ready for Release" (or "Partially Fulfilled")
      *

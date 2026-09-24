@@ -139,7 +139,6 @@ const initialUsers = [
   { id: 'USR-001', name: 'DOH Super Admin', role: 'Super Admin', email: 'superadmin@bloodlink.dvo', status: 'Active', hospitalId: null },
   { id: 'USR-002', name: 'DOH Medical Officer IV', role: 'Administrator', email: 'admin@bloodlink.dvo', status: 'Active', hospitalId: null },
   { id: 'USR-003', name: 'Nurse Joy Cruz', role: 'Registry Staff', email: 'registry@bloodlink.dvo', status: 'Active', hospitalId: null },
-  { id: 'USR-004', name: 'RMT Mark Lopez', role: 'Blood Bank Staff', email: 'bloodbank@bloodlink.dvo', status: 'Active', hospitalId: null },
   { id: 'USR-005', name: 'SNBC Issuance Officer', role: 'Issuance Personnel', email: 'issuance@bloodlink.dvo', status: 'Active', hospitalId: null },
   { id: 'USR-006', name: 'Dr. Roberto Santos', role: 'Hospital User', email: 'hospital@bloodlink.dvo', status: 'Active', hospitalId: 'HOSP-001' },
   { id: 'USR-007', name: 'Dr. Clara Santos (RMT)', role: 'Serology Staff', email: 'serology@bloodlink.dvo', status: 'Active', hospitalId: null },
@@ -558,49 +557,10 @@ export const useBloodStore = create(
         hospitalId: null
       },
       loginSystemUser: async (email, password) => {
-        // ── DEV BYPASS: pass123 skips API entirely — instant local auth ──
-        // Hardcoded mock roster so this always works regardless of persisted state.
-        const DEV_PASSWORD = 'pass123';
-        const MOCK_ROSTER = [
-          { id: 'USR-001', name: 'DOH Super Admin',          role: 'Super Admin',        email: 'superadmin@bloodlink.dvo', status: 'Active', hospitalId: null },
-          { id: 'USR-002', name: 'DOH Medical Officer IV',   role: 'Administrator',       email: 'admin@bloodlink.dvo',      status: 'Active', hospitalId: null },
-          { id: 'USR-003', name: 'Nurse Joy Cruz',           role: 'Registry Staff',      email: 'registry@bloodlink.dvo',   status: 'Active', hospitalId: null },
-          { id: 'USR-004', name: 'RMT Mark Lopez',           role: 'Blood Bank Staff',    email: 'bloodbank@bloodlink.dvo',  status: 'Active', hospitalId: null },
-          { id: 'USR-005', name: 'SNBC Issuance Officer',    role: 'Issuance Personnel',  email: 'issuance@bloodlink.dvo',   status: 'Active', hospitalId: null },
-          { id: 'USR-006', name: 'Dr. Roberto Santos',       role: 'Hospital User',       email: 'hospital@bloodlink.dvo',   status: 'Active', hospitalId: 'HOSP-001' },
-          { id: 'USR-007', name: 'Dr. Clara Santos (RMT)',   role: 'Serology Staff',      email: 'serology@bloodlink.dvo',   status: 'Active', hospitalId: null },
-          { id: 'USR-008', name: 'Engr. Miguel Reyes',       role: 'Production Staff',    email: 'production@bloodlink.dvo', status: 'Active', hospitalId: null },
-        ];
-
-        // ── Try Laravel API first so protected operations (including PhilSMS
-        // recalls) receive a Sanctum token. ──
-        try {
-          const data = await apiLogin(email, password);
-          if (data.user && data.token) {
-            set({ authSystemUser: data.user });
-            return data.user;
-          }
-        } catch (err) {
-          console.warn('[BloodLink] API login failed, using local fallback:', err.message);
-        }
-
-        // ── DEV fallback when the Laravel API is unavailable ──
-        if (password === DEV_PASSWORD) {
-          const emailLower = email.toLowerCase();
-          const devUser = MOCK_ROSTER.find(u => u.email.toLowerCase() === emailLower);
-          if (devUser) {
-            console.info('[BloodLink] DEV fallback — logged in as:', devUser.role);
-            set({ authSystemUser: devUser });
-            return devUser;
-          }
-        }
-
-        // ── Last resort: persisted local users array ──
-        const emailLower = email.toLowerCase();
-        const found = get().users.find(u => u.email.toLowerCase() === emailLower);
-        if (found) {
-          set({ authSystemUser: found });
-          return found;
+        const data = await apiLogin(email, password);
+        if (data.user && data.token) {
+          set({ authSystemUser: data.user });
+          return data.user;
         }
         return null;
       },
@@ -1335,7 +1295,7 @@ export const useBloodStore = create(
 
       updateUser: async (userId, updatedFields) => {
         const now = new Date();
-        const roleMap = { 'Super Admin': 'ROLE-001', 'Administrator': 'ROLE-002', 'Registry Staff': 'ROLE-003', 'Blood Bank Staff': 'ROLE-004', 'Issuance Personnel': 'ROLE-005', 'Hospital User': 'ROLE-006', 'Serology Staff': 'ROLE-007', 'Production Staff': 'ROLE-008' };
+        const roleMap = { 'Super Admin': 'ROLE-001', 'Administrator': 'ROLE-002', 'Registry Staff': 'ROLE-003', 'Issuance Personnel': 'ROLE-005', 'Hospital User': 'ROLE-006', 'Serology Staff': 'ROLE-007', 'Production Staff': 'ROLE-008' };
 
         // ── Try API first ──
         const numericId = parseInt(userId.replace('USR-', ''), 10);
@@ -1490,7 +1450,7 @@ export const useBloodStore = create(
                 const auditLogId = 'LOG-' + Math.floor(100 + Math.random() * 900);
                 set((state) => ({
                   bloodRequests: reqData.bloodRequests,
-                  auditLogs: [{ logId: auditLogId, userId: state.authSystemUser?.id || 'USR-005', action: `Verified Request ${refNo} for ${req.hospital} (Sent to Blood Bank)`, module: 'Issuance', recordId: refNo, oldValue: 'Pending Verification', newValue: 'Verified', performedAt: new Date().toLocaleString() }, ...state.auditLogs]
+                  auditLogs: [{ logId: auditLogId, userId: state.authSystemUser?.id || 'USR-005', action: `Verified Request ${refNo} for ${req.hospital} (Ready for preparation)`, module: 'Issuance', recordId: refNo, oldValue: 'Pending Verification', newValue: 'Verified', performedAt: new Date().toLocaleString() }, ...state.auditLogs]
                 }));
                 return;
               }
@@ -1504,7 +1464,7 @@ export const useBloodStore = create(
           const auditLogId = 'LOG-' + Math.floor(100 + Math.random() * 900);
           return {
             bloodRequests: state.bloodRequests.map(r => r.refNo === refNo ? { ...r, status: 'Verified' } : r),
-            auditLogs: [{ logId: auditLogId, userId: state.authSystemUser?.id || 'USR-005', action: `Verified Request ${refNo} for ${req.hospital} (Sent to Blood Bank)`, module: 'Issuance', recordId: refNo, oldValue: 'Pending Verification', newValue: 'Verified', performedAt: new Date().toLocaleString() }, ...state.auditLogs]
+            auditLogs: [{ logId: auditLogId, userId: state.authSystemUser?.id || 'USR-005', action: `Verified Request ${refNo} for ${req.hospital} (Ready for preparation)`, module: 'Issuance', recordId: refNo, oldValue: 'Pending Verification', newValue: 'Verified', performedAt: new Date().toLocaleString() }, ...state.auditLogs]
           };
         });
       },

@@ -15,7 +15,7 @@ return new class extends Migration
             $table->unsignedBigInteger('request_id');
             $table->foreign('request_id')->references('request_id')->on('blood_requests')->onDelete('cascade');
 
-            // Blood Bank Staff who prepared the blood units
+            // Staff member who prepared the blood units
             $table->unsignedBigInteger('processed_by');
             $table->foreign('processed_by')->references('user_id')->on('users')->onDelete('restrict');
 
