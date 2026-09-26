@@ -861,7 +861,7 @@ export default function AdminDashboard() {
 
               <p className="sidebar-section-label text-slate-400 text-[9px] font-bold uppercase px-4 mt-4 mb-1 tracking-widest">Distribution</p>
               {renderNavButton({ id: 'forecasting', label: 'Demand Forecasting', icon: Activity })}
-              {renderNavButton({ id: 'distribution', label: 'Distribution Recommendation:', icon: Map })}
+              {renderNavButton({ id: 'distribution', label: 'Distribution Recommendation', icon: Map })}
               {renderNavButton({ id: 'hospital_history', label: 'Distribution Summary', icon: ClipboardList })}
               {renderNavButton({ id: 'recall', label: 'Donor Recall', icon: RefreshCw })}
               {renderNavButton({ id: 'donation_events', label: 'Donation Events', icon: Calendar })}

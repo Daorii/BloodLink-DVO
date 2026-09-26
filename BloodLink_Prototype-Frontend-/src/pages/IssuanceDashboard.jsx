@@ -637,7 +637,7 @@ export default function IssuanceDashboard() {
                     className={`w-full text-left nav-link ${activeTab === 'distribution' ? 'active' : ''}`}
                     title={isSidebarCollapsed ? 'Distribution Recommendation' : ""}>
                     <Droplets className="nav-icon" />
-                    <span className="sidebar-copy">Distribution Reco.</span>
+                    <span className="sidebar-copy">Distribution Recommendation</span>
                   </button>
                   <button onClick={() => { setActiveTab('forecast'); if (!granularForecasts || granularForecasts.length === 0) generateGranularForecast(fcWeeks); }}
                     className={`w-full text-left nav-link ${activeTab === 'forecast' ? 'active' : ''}`}
@@ -3422,7 +3422,7 @@ export default function IssuanceDashboard() {
                     {!item.equityComputed && (
                       <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
                         <Activity className="w-3 h-3" />
-                        <span>Run <strong>Distribution Reco</strong> for {item.bloodType} {item.component} to see equity recommendation before processing.</span>
+                        <span>Run <strong>Distribution Recommendation</strong> for {item.bloodType} {item.component} to see equity recommendation before processing.</span>
                       </div>
                     )}
                   </div>

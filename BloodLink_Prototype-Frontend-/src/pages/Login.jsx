@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff, LockKeyhole, LogIn, Mail, ShieldCheck } from 'lucide-react';
+import { AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff, LogIn, Mail, ShieldCheck } from 'lucide-react';
 import { useBloodStore } from '../store/useBloodStore';
 import { isValidEmail } from '../utils/validation';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
@@ -53,23 +53,23 @@ export default function Login() {
       <div className="relative flex items-center gap-3 text-xs text-slate-300"><CheckCircle2 className="h-4 w-4 text-emerald-400" />Authorized personnel only · Activity is recorded for operational security.</div>
     </section>
 
-    <section className="flex min-h-screen items-center justify-center bg-slate-50 px-5 py-10 sm:px-8">
+    <section className="flex min-h-screen items-center justify-center bg-white px-6 py-12 sm:px-12">
       <div className="w-full max-w-md">
-        <Link to="/" className="mb-10 inline-flex items-center gap-2 text-xs font-bold text-slate-500 transition hover:text-slate-900"><ArrowLeft className="h-4 w-4" />Back to Landing Page</Link>
-        <div className="mb-9 flex items-center gap-2 lg:hidden"><img src={bloodlinkLogo} alt="BloodLink DVO" className="h-9 w-auto" /><img src={davaoLogo} alt="Davao City" className="h-10 w-auto" /></div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-[0_24px_60px_-28px_rgba(15,23,42,.35)] sm:p-9">
-          <div className="grid h-11 w-11 place-items-center rounded-2xl bg-rose-50 text-rose-700"><LockKeyhole className="h-5 w-5" /></div>
-          <h2 className="mt-5 text-2xl font-black tracking-tight text-slate-950">Sign in to BloodLink</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">Use the work email and password assigned to your account.</p>
-          <form onSubmit={submit} className="mt-7 space-y-5" noValidate>
+        <Link to="/" className="mb-8 inline-flex items-center gap-2 text-xs font-bold text-slate-500 transition hover:text-slate-900"><ArrowLeft className="h-4 w-4" />Back to Landing Page</Link>
+        <div className="mb-8 flex items-center gap-2 lg:hidden"><img src={bloodlinkLogo} alt="BloodLink DVO" className="h-9 w-auto" /><img src={davaoLogo} alt="Davao City" className="h-10 w-auto" /></div>
+        
+        <div>
+          <h2 className="text-3xl font-black tracking-tight text-slate-950">Sign in to BloodLink</h2>
+          <p className="mt-2.5 text-sm leading-6 text-slate-500">Use the work email and password assigned to your account.</p>
+          <form onSubmit={submit} className="mt-8 space-y-5" noValidate>
             {error && <div role="alert" className="flex gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-xs font-medium leading-5 text-rose-800"><AlertCircle className="mt-0.5 h-4 w-4 flex-none" />{error}</div>}
-            <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">Work email</span><div className="relative"><Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input autoComplete="email" autoFocus type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@bloodlink.dvo" className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-rose-500 focus:ring-4 focus:ring-rose-100" /></div></label>
-            <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">Password</span><div className="relative"><LockKeyhole className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input autoComplete="current-password" type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-11 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-rose-500 focus:ring-4 focus:ring-rose-100" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></label>
-            <button disabled={isSubmitting} type="submit" className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 py-3.5 text-sm font-bold text-white shadow-lg shadow-slate-900/15 transition hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-slate-300 disabled:cursor-wait disabled:opacity-70"><LogIn className="h-4 w-4" />{isSubmitting ? 'Verifying secure access…' : 'Sign in'}</button>
+            <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">Work email</span><div className="relative"><Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input autoComplete="email" autoFocus type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@bloodlink.dvo" className="w-full rounded-xl border border-slate-200 bg-slate-50/50 py-3 pl-10 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-rose-500 focus:bg-white focus:ring-4 focus:ring-rose-100" /></div></label>
+            <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">Password</span><div className="relative"><input autoComplete="current-password" type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" className="w-full rounded-xl border border-slate-200 bg-slate-50/50 py-3 pl-4 pr-11 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-rose-500 focus:bg-white focus:ring-4 focus:ring-rose-100" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></label>
+            <button disabled={isSubmitting} type="submit" className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-slate-300 disabled:cursor-wait disabled:opacity-70"><LogIn className="h-4 w-4" />{isSubmitting ? 'Verifying secure access…' : 'Sign in'}</button>
           </form>
-          <div className="mt-7 border-t border-slate-100 pt-5 text-center text-xs leading-5 text-slate-500">Need help accessing your account? Contact your BloodLink system administrator.</div>
+          <div className="mt-8 border-t border-slate-100 pt-5 text-xs leading-5 text-slate-500">Need help accessing your account? Contact your BloodLink system administrator.</div>
         </div>
-        <p className="mt-6 text-center text-[11px] text-slate-400">BloodLink DVO</p>
+        <p className="mt-8 text-[11px] text-slate-400">BloodLink DVO</p>
       </div>
     </section>
   </main>;
