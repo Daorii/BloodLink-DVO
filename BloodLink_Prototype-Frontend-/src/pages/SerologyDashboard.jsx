@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useBloodStore } from '../store/useBloodStore';
 import {
-  ShieldCheck, AlertTriangle, FileText, CheckCircle, Plus, X, Search,
-  LogOut, Activity, FlaskConical, ChevronsLeft, ChevronsRight,
-  Clock, Eye, Hash, ChevronLeft, ChevronRight, Droplets
+  AlertTriangle, CheckCircle, Plus, X, Search, LogOut, Activity,
+  FlaskConical, Clock, Eye, Hash, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import bloodlinkLogo from '../assets/bloodlinks_logo/bloodlink-logo.png';
@@ -31,7 +30,7 @@ export default function SerologyDashboard() {
   const {
     labTestResults, donations, addLabTestResult, fetchDonationBySerial,
     fetchLabResultsFromAPI, fetchDonationsFromAPI,
-    authSystemUser, isSidebarCollapsed, toggleSidebar
+    authSystemUser
   } = useBloodStore();
 
   const [searchQuery, setSearchQuery]     = useState('');
@@ -181,7 +180,7 @@ export default function SerologyDashboard() {
           
           {/* Brand & Portal Badge */}
           <div className="flex items-center gap-4">
-            <Link to="/" className="flex items-center gap-2.5 hover:opacity-85 transition-opacity" title="Go to Landing Page">
+            <div className="flex items-center gap-2.5" aria-label="BloodLink Serology Portal">
               <img src={bloodlinkLogo} alt="BloodLink DVO" className="h-9 w-auto object-contain" />
               <div className="leading-tight">
                 <span className="font-extrabold text-sm text-slate-900 tracking-tight block">BloodLink</span>
@@ -189,31 +188,8 @@ export default function SerologyDashboard() {
                   Serology Portal
                 </span>
               </div>
-            </Link>
-
-            <span className="h-6 w-px bg-slate-200 hidden sm:block" />
-
-            <div className="hidden sm:flex items-center gap-2 text-xs font-bold text-slate-700 bg-slate-100 border border-slate-200/80 px-3 py-1.5 rounded-lg">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              <span>TTI Screening Ledger</span>
             </div>
-          </div>
 
-          {/* Center / Action Pill */}
-          <div className="flex items-center gap-3">
-            {pendingDonations.length > 0 && (
-              <div className="hidden md:flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg">
-                <Clock className="w-3.5 h-3.5 text-amber-600" />
-                <span>{pendingDonations.length} Pending Result{pendingDonations.length > 1 ? 's' : ''}</span>
-              </div>
-            )}
-            <button
-              onClick={() => openModal()}
-              className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Record TTI Lab Result</span>
-            </button>
           </div>
 
           {/* User Profile & Exit */}
@@ -292,9 +268,6 @@ export default function SerologyDashboard() {
                   {pendingDonations.length > 10 && <span className="px-2.5 py-1 text-[10px] text-amber-600 font-semibold">+{pendingDonations.length - 10} more</span>}
                 </div>
               </div>
-              <button onClick={() => openModal()} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded-lg transition-colors cursor-pointer flex-shrink-0">
-                Encode Result
-              </button>
             </div>
           )}
 
@@ -316,7 +289,7 @@ export default function SerologyDashboard() {
               </select>
             </div>
             <button onClick={() => openModal()}
-              className="w-full md:w-auto px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer">
+              className="w-full md:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer">
               <Plus className="w-4 h-4" /> Encode Lab Result
             </button>
           </div>
@@ -580,7 +553,7 @@ export default function SerologyDashboard() {
                     variant: 'default',
                     onConfirm: () => { closeConfirm(); handleSave(); },
                   })}
-                  className="px-4 py-2 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5">
+                  className="px-4 py-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5">
                   {saving ? <><Activity className="w-3 h-3 animate-spin" /> Saving...</> : 'Save & Sign Off'}
                 </button>
               </div>

@@ -388,10 +388,37 @@ export default function ProductionDashboard() {
 
 
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans text-slate-800 antialiased">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 antialiased">
+
+      <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2.5" aria-label="BloodLink Production Portal">
+              <img src={bloodlinkLogo} alt="BloodLink DVO" className="h-9 w-auto object-contain" />
+              <div className="leading-tight">
+                <span className="font-extrabold text-sm text-slate-900 tracking-tight block">BloodLink</span>
+                <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200/80 px-1.5 py-0.2 rounded inline-block">Production Portal</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2.5">
+              <span className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs">{userInitials}</span>
+              <div className="hidden lg:block text-left leading-tight">
+                <p className="text-xs font-bold text-slate-900">{signedInUser.name}</p>
+                <p className="text-[10px] text-slate-400 font-medium">{signedInUser.role}</p>
+              </div>
+            </div>
+            <span className="h-6 w-px bg-slate-200" />
+            <Link to="/" className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition-colors" title="Exit Dashboard">
+              <LogOut className="w-4 h-4" />
+            </Link>
+          </div>
+        </div>
+      </header>
 
       {/* ── Sidebar ── */}
-      <aside className={`sidebar flex flex-col justify-between border-r border-slate-200 bg-white ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
+      <aside style={{ display: 'none' }} className={`sidebar flex flex-col justify-between border-r border-slate-200 bg-white ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
         <div className="sidebar-inner w-full flex flex-col justify-between">
           <div>
           <div className={`py-5 border-b border-slate-100 flex items-center justify-between ${isSidebarCollapsed ? 'px-3' : 'px-6'}`}>
@@ -440,8 +467,8 @@ export default function ProductionDashboard() {
       </aside>
 
       {/* ── Main ── */}
-      <main className={`content-area flex flex-col min-w-0 bg-slate-50 ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
-        <header className="portal-topbar sticky top-0 z-20 bg-white border-b border-slate-200 flex items-center justify-between px-8">
+      <main className="max-w-7xl mx-auto">
+        <header className="hidden portal-topbar sticky top-0 z-20 bg-white border-b border-slate-200 flex items-center justify-between px-8">
           <div>
             <h2 className="text-slate-900 font-bold text-sm leading-tight">Blood Component Processing & Inventory Entry</h2>
             <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5 tracking-wider">Separate, label, and record blood components from Serology-cleared donations</p>
@@ -500,10 +527,6 @@ export default function ProductionDashboard() {
                   )}
                 </div>
               </div>
-              <button onClick={() => openModal()}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg transition-colors cursor-pointer flex-shrink-0">
-                Process Unit
-              </button>
             </div>
           )}
 
@@ -529,7 +552,7 @@ export default function ProductionDashboard() {
               </select>
             </div>
             <button onClick={() => openModal()}
-              className="w-full md:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer">
+              className="w-full md:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer">
               <Plus className="w-4 h-4" /> Process Blood Unit
             </button>
           </div>
@@ -948,7 +971,7 @@ export default function ProductionDashboard() {
                     variant: 'default',
                     onConfirm: () => { closeConfirm(); handleSave(); },
                   })}
-                  className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5">
+                  className="px-4 py-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5">
                   {saving ? <><Activity className="w-3 h-3 animate-spin" /> Saving...</> : `Record ${componentRows.length} Component${componentRows.length > 1 ? 's' : ''}`}
                 </button>
               </div>

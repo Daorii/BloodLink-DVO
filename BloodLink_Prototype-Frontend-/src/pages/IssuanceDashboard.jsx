@@ -124,6 +124,7 @@ export default function IssuanceDashboard() {
   const isHospitalUser  = role === 'Hospital User';
   const isIssuanceStaff = role === 'Issuance Personnel';
   const hospitalId      = authSystemUser?.hospitalId || 'HOSP-001';
+  const userInitials    = (authSystemUser?.name || 'Hospital User').split(' ').map(word => word[0]).join('').slice(0, 2).toUpperCase();
 
   // Load blood requests + issuances from DB and auto-generate forecast on mount
   useEffect(() => {
@@ -524,9 +525,10 @@ export default function IssuanceDashboard() {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
+    <div className={`${isHospitalUser ? 'min-h-screen' : 'flex min-h-screen'} bg-slate-50 text-slate-800 font-sans antialiased`}>
 
       {/* SIDEBAR */}
+      {!isHospitalUser && (
       <aside className={`sidebar flex flex-col justify-between border-r border-slate-200 bg-white ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
         <div id="issuance-sidebar" className="sidebar-inner w-full flex flex-col justify-between">
           <div>
@@ -659,11 +661,38 @@ export default function IssuanceDashboard() {
           </div>
         </div>
       </aside>
+      )}
 
       {/* CONTENT AREA */}
-      <div className={`content-area flex flex-col flex-1 h-screen bg-slate-50 ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
+      <div className={isHospitalUser ? 'min-h-screen flex flex-col bg-slate-50' : `content-area flex flex-col flex-1 h-screen bg-slate-50 ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
 
-        <header className="portal-topbar sticky top-0 z-20 bg-white border-b border-slate-200 flex items-center justify-between px-8">
+        <header className={isHospitalUser ? 'sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm' : 'portal-topbar sticky top-0 z-20 bg-white border-b border-slate-200 flex items-center justify-between px-8'}>
+          {isHospitalUser ? (
+            <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2.5" aria-label="BloodLink Hospital Portal">
+                  <img src={bloodlinkLogo} alt="BloodLink DVO" className="h-9 w-auto object-contain" />
+                  <div className="leading-tight">
+                    <span className="font-extrabold text-sm text-slate-900 tracking-tight block">BloodLink</span>
+                    <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200/80 px-1.5 py-0.2 rounded inline-block">Hospital Portal</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs">{userInitials}</span>
+                  <div className="hidden lg:block text-left leading-tight">
+                    <p className="text-xs font-bold text-slate-900">{authSystemUser?.name || 'Hospital User'}</p>
+                    <p className="text-[10px] text-slate-400 font-medium">{role}</p>
+                  </div>
+                </div>
+                <span className="h-6 w-px bg-slate-200" />
+                <Link to="/" className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition-colors" title="Exit Dashboard">
+                  <LogOut className="w-4 h-4" />
+                </Link>
+              </div>
+            </div>
+          ) : <>
           <div>
             <h2 className="text-slate-900 font-bold text-sm leading-tight">
               {isHospitalUser ? 'Blood Request Portal' : activeTab === 'inventory' ? 'Component Inventory' : activeTab === 'issuance_details' ? 'Issuance Audit Log' : activeTab === 'distribution' ? 'Distribution Recommendation' : activeTab === 'forecast' ? 'Demand Forecasting' : 'Issuance Requests'}
@@ -673,12 +702,6 @@ export default function IssuanceDashboard() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {isHospitalUser && (
-              <button onClick={openNewForm}
-                className="bg-[#C21C24] hover:bg-[#A8181F] text-white px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer">
-                <Plus className="w-3.5 h-3.5" /> New Blood Request
-              </button>
-            )}
             <div className="text-right">
               <p className="text-xs font-bold text-slate-900">{authSystemUser?.name || 'Staff'}</p>
               <p className="text-[10px] text-slate-400">{role}</p>
@@ -687,9 +710,10 @@ export default function IssuanceDashboard() {
               {isHospitalUser ? 'HU' : 'IP'}
             </span>
           </div>
+          </>}
         </header>
 
-        <main className="p-8 flex-1 space-y-6">
+        <main className={`${isHospitalUser ? 'max-w-7xl mx-auto w-full p-6 md:p-8' : 'p-8'} flex-1 space-y-6`}>
 
           {submitted && (
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-4 flex items-center justify-between">
@@ -747,6 +771,12 @@ export default function IssuanceDashboard() {
                   {isHospitalUser ? 'My Blood Requests' : 'Hospital Issuance Queue'}
                 </h3>
                 <div className="flex items-center gap-3">
+                  {isHospitalUser && (
+                    <button onClick={openNewForm}
+                      className="bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer">
+                      <Plus className="w-3.5 h-3.5" /> New Blood Request
+                    </button>
+                  )}
                   {isIssuanceStaff && (
                     <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
                       <button onClick={() => setQueueFilter('all')}
