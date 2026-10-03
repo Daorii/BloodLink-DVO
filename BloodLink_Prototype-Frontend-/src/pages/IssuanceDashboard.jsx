@@ -112,7 +112,7 @@ export default function IssuanceDashboard() {
   const [fcHospital,        setFcHospital]        = useState('ALL');
   const [fcBloodType,       setFcBloodType]       = useState('ALL');
   const [fcComponent,       setFcComponent]       = useState('ALL');
-  const [fcWeeks,           setFcWeeks]           = useState(4);
+  const [fcWeeks,           setFcWeeks]           = useState(1);
   const [fcLoading,         setFcLoading]         = useState(false);
   const [chartClickedPoint, setChartClickedPoint] = useState(null);
   const [showAllGapRows,    setShowAllGapRows]    = useState(false);
@@ -2347,7 +2347,7 @@ export default function IssuanceDashboard() {
               ? new Set(gf.map(f => `${f.hospitalId}|${f.bloodTypeId}|${f.componentId}`)).size
               : new Set(filtered.map(f => `${f.hospitalId}|${f.bloodTypeId}|${f.componentId}`)).size;
             const highestDemandCombo = (() => {
-              const rows = (isOverview ? gf : filtered).filter(f => f.weeksAhead === 1);
+              const rows = (isOverview ? gf : filtered).filter(f => f.weeksAhead === fcWeeks);
               if (!rows.length) return null;
               return rows.reduce((best, f) => f.predictedDemand > (best?.predictedDemand ?? 0) ? f : best, null);
             })();
@@ -2450,7 +2450,7 @@ export default function IssuanceDashboard() {
                       <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">Weeks Ahead</label>
                       <select value={fcWeeks} onChange={e => setFcWeeks(Number(e.target.value))}
                         className="w-full border border-slate-200 rounded-lg p-2 text-xs focus:ring-2 focus:ring-slate-900 outline-none bg-white">
-                        {[2, 4, 6, 8].map(w => <option key={w} value={w}>{w} weeks</option>)}
+                        {[1, 2, 4, 6, 8].map(w => <option key={w} value={w}>{w === 1 ? 'Next week' : `${w} weeks out`}</option>)}
                       </select>
                     </div>
                   </div>
@@ -2525,7 +2525,7 @@ export default function IssuanceDashboard() {
 
                       // Sum predicted demand (week 1) per blood_type + component across all hospitals
                       const demandMap = {};
-                      gf.filter(f => f.weeksAhead === 1).forEach(f => {
+                      gf.filter(f => f.weeksAhead === fcWeeks).forEach(f => {
                         const key = `${f.bloodTypeId}|${f.componentId}`;
                         demandMap[key] = (demandMap[key] || 0) + f.predictedDemand;
                       });
@@ -2755,51 +2755,6 @@ export default function IssuanceDashboard() {
 
 
 
-                    {/* Per Hospital Breakdown (Overview only) */}
-                    {isOverview && (
-                      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                        <div className="px-6 py-4 border-b border-slate-100">
-                          <h3 className="font-bold text-slate-900 text-sm tracking-tight">Next-Week Demand by Hospital</h3>
-                          <p className="text-xs text-slate-500 mt-0.5">Total predicted units each hospital will need — click to filter</p>
-                        </div>
-                        <div className="divide-y divide-slate-100">
-                          {hospitals.map(hosp => {
-                            const rows = gf.filter(f => f.hospitalId === hosp.id && f.weeksAhead === 1);
-                            const total = rows.reduce((s, f) => s + f.predictedDemand, 0);
-                            const allTotal = gf.filter(f => f.weeksAhead === 1).reduce((s, f) => s + f.predictedDemand, 0);
-                            const pct = allTotal ? Math.round((total / allTotal) * 100) : 0;
-                            const barW = allTotal ? (total / allTotal) * 100 : 0;
-                            const logoImg = hospitals.find(h => h.id === hosp.id)?.name?.toLowerCase().includes('spmc') ? spmcLogo :
-                                            hospitals.find(h => h.id === hosp.id)?.name?.toLowerCase().includes('red cross') ? prcLogo :
-                                            hospitals.find(h => h.id === hosp.id)?.name?.toLowerCase().includes('san pedro') ? snbcLogo : davaoLogo;
-                            return (
-                              <button key={hosp.id} onClick={() => { setFcHospital(hosp.id); setRecHospital(hosp.id); }}
-                                className="w-full flex items-center gap-4 px-6 py-3.5 hover:bg-slate-50 transition text-left group cursor-pointer">
-                                {/* Actual Hospital PNG Logo */}
-                                <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 p-1 flex items-center justify-center shadow-xs flex-shrink-0">
-                                  <img src={logoImg} alt={hosp.name} className="w-full h-full object-contain" />
-                                </div>
-                                <div className="w-36 flex-shrink-0">
-                                  <p className="font-bold text-slate-800 text-xs leading-tight group-hover:text-indigo-650 transition">{hosp.name.split('(')[0].trim()}</p>
-                                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">{hosp.id}</p>
-                                </div>
-                                <div className="flex-1">
-                                  <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                                    <div className="h-full bg-indigo-500 rounded-full transition-all" style={{ width: `${barW}%` }} />
-                                  </div>
-                                </div>
-                                <div className="w-20 text-right flex-shrink-0">
-                                  <span className="font-extrabold text-slate-900 font-mono text-sm">{total.toFixed(0)}</span>
-                                  <span className="text-[10px] text-slate-400 ml-1">units</span>
-                                </div>
-                                <span className="text-[10px] text-slate-400 w-10 text-right flex-shrink-0">{pct}%</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
                     {/* ─── GRANULAR COMPONENT BREAKDOWN: Hospital List → Drilldown ─── */}
                     <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
 
@@ -2831,9 +2786,9 @@ export default function IssuanceDashboard() {
 
                             <div className="divide-y divide-slate-100">
                               {hospitals.map((hosp, idx) => {
-                                const rows = gf.filter(f => f.hospitalId === hosp.id && f.weeksAhead === 1);
+                                const rows = gf.filter(f => f.hospitalId === hosp.id && f.weeksAhead === fcWeeks);
                                 const totalBags = rows.reduce((s, f) => s + f.predictedDemand, 0);
-                                const allTotal = gf.filter(f => f.weeksAhead === 1).reduce((s, f) => s + f.predictedDemand, 0);
+                                const allTotal = gf.filter(f => f.weeksAhead === fcWeeks).reduce((s, f) => s + f.predictedDemand, 0);
                                 const pct = allTotal ? Math.round((totalBags / allTotal) * 100) : 0;
                                 const barW = allTotal ? (totalBags / allTotal) * 100 : 0;
                                 const highestComp = rows.length ? rows.reduce((a, b) => b.predictedDemand > a.predictedDemand ? b : a, rows[0]) : null;
@@ -2907,7 +2862,7 @@ export default function IssuanceDashboard() {
 
                       {/* ── DRILLDOWN VIEW (hospital selected) ── */}
                       {drilldownHospital && (() => {
-                        const hospRows = gf.filter(f => f.hospitalId === drilldownHospital.id && f.weeksAhead === 1);
+                        const hospRows = gf.filter(f => f.hospitalId === drilldownHospital.id && f.weeksAhead === fcWeeks);
                         const totalBags = hospRows.reduce((s, f) => s + f.predictedDemand, 0);
                         const byType = BLOOD_TYPES.map(bt => {
                           const typeRows = hospRows.filter(f => f.bloodTypeId === bt);

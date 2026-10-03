@@ -1008,6 +1008,21 @@ export const useBloodStore = create(
               };
             });
 
+            // ── Compute slope per group (week 1 → last week demand delta) ──
+            // Fixes "Rising Trends" KPI always showing 0 (slope was never set).
+            const groupMap = {};
+            results.forEach(r => {
+              const key = `${r.hospitalId}|${r.bloodTypeId}|${r.componentId}`;
+              if (!groupMap[key]) groupMap[key] = [];
+              groupMap[key].push(r);
+            });
+            results.forEach(r => {
+              const key = `${r.hospitalId}|${r.bloodTypeId}|${r.componentId}`;
+              const grp = (groupMap[key] || []).sort((a, b) => a.weeksAhead - b.weeksAhead);
+              r.slope = grp.length >= 2
+                ? grp[grp.length - 1].predictedDemand - grp[0].predictedDemand
+                : 0;
+            });
 
             set({ granularForecasts: results });
             console.log(`[MLR] Loaded ${results.length} forecasts from Python service (R²=${data.metadata?.r2_test ?? '?'})`);
